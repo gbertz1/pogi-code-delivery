@@ -1,16 +1,18 @@
 # pogi-code-delivery
 
-Public **manual-only** distribution point for Order 66 / Adventure Land V3 release artifacts.
+Public, manually approved **Order 66 / Adventure Land V3** JavaScript delivery artifacts.
 
-**Status: NO APPROVED V3 RELEASE. No character should load code from this repository yet.**
+## October 24, 2026 — approved inert V3 staging release
 
-- Development source of truth: private `gbertz1/PogiBrain`, `adventureland/v3/`.
-- Public contents: only **reviewed, generated, non-secret browser bundles** and matching manifests after explicit approval.
-- Every release must pass full-source offline tests, a four-role inert-load test, secret review, SHA-256 verification, and a manually checked immutable GitHub commit pin.
-- Loading a staged file must **not** launch characters. Activation and any in-game tests need a separate user-present step.
-- **No GitHub Actions, no paid build services, no automatic uploads, auto-updates, reloads, retries, or fallbacks to moving branches.**
-- Stable V2 is unchanged; V3 Recovery remains postponed.
+The owner explicitly approved publication of the four readable V3 browser bundles. They are visible to everyone, but **are not authorized for gameplay activation**.
 
-Public repository files are visible to everyone. Never publish credentials, tokens, unreviewed private PogiBrain source, or character/account secrets.
+- **Source of truth:** the private `gbertz1/PogiBrain` V3 source, pinned to `3619b7cd5a5671d426eb53784e3cee02941849fa`.
+- **Files:** `order66-v3-Rentaro.js`, `order66-v3-Hibari.js`, `order66-v3-Harutora.js`, and `order66-v3-Souji.js`; see `release-manifest.json` for exact SHA-256 hashes and sizes.
+- **Validated:** 206 source-file Git blob hashes; 13/13 delivery tests; 489/489 V3 regression tests; V2/V3 isolation and runtime boundary checks. All four bundles load inertly and include 94 CommonJS modules each.
+- **Not enabled:** character auto-start, Skeleton Central/First State startup, V3 production selection, Recovery, and automatic code replacement.
+- **Delivery:** use full 40-character **public Git commit SHA** in all future raw URLs. Never use `main`, `latest`, or a moving tag in a character CODE loader.
+- **Operations:** no GitHub Actions, paid build service, auto upload, unattended update, retry loop, or browser restart.
 
-Current release: **none**.
+Publishing files here is not permission to load them in a live game. Any browser/in-game smoke test must be separate and user-present. Stable V2 remains unchanged.
+
+These release bundles include readable portions of the implementation from the private development repository. Do not publish credentials, tokens, or unreviewed private material in future releases.
