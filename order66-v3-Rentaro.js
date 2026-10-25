@@ -1,6 +1,6 @@
-/* ORDER66 V3 | Rentaro | 3619b7cd5a5671d426eb53784e3cee02941849fa | INERT FULL-GRAPH STAGING */
+/* ORDER66 V3 | Rentaro | 0c92c5bccf46349d67d47d4bc90d0ee50ada300b | INERT FULL-GRAPH STAGING */
 (function(root){"use strict";
-var role="Rentaro",commit="3619b7cd5a5671d426eb53784e3cee02941849fa";
+var role="Rentaro",commit="0c92c5bccf46349d67d47d4bc90d0ee50ada300b";
 if(!root.character||root.character.name!==role)throw Error("V3_WRONG_CHARACTER");
 if(root.__POGI_V3_DELIVERY)throw Error("V3_DELIVERY_ALREADY_INSTALLED");
 var defs={"adapters/adventureland/LiveAdapters.js":[function(require,module,exports){
@@ -887,6 +887,10 @@ async function bootstrapV3({
   const deploymentSafety=createDeploymentSafety({affectedCharacters:manifest.required_characters,fighters:manifest.fighters,now});
   const recovery=createRecoveryCoordinator();
   const recoveryExecutor=createRecoveryExecutor({coordinator:recovery});
+  if(String(activationMode).toLowerCase()==='supervised'){
+    recoveryExecutor.recover=async()=>({ok:false,executed:false,
+      error:'V3_SUPERVISED_RECOVERY_DISABLED',action:'STOP_AND_ALERT'});
+  }
   staleGuard.publishBootProof(epoch);
 
   const changes=createDefaultChangeVerificationRuntime({root,now});
@@ -953,8 +957,9 @@ async function bootstrapV3({
     lifecycle,
     moduleSupervisor,
     proof,
-    recovery,
-    recoveryExecutor,
+    // P1 supervised runtime can report stalled progress but cannot execute Recovery.
+    recovery:String(activationMode).toLowerCase()==='supervised'?null:recovery,
+    recoveryExecutor:String(activationMode).toLowerCase()==='supervised'?null:recoveryExecutor,
     alertManager:changes.alertManager,
     now,
     intervalMs:supervisorIntervalMs,
@@ -988,6 +993,156 @@ async function bootstrapV3({
 module.exports={bootstrapV3,defaultHooks};
 
 },{"./Manifest":"bootstrap/Manifest.js","../core/runtime/RuntimeEpoch":"core/runtime/RuntimeEpoch.js","../core/runtime/FrameLease":"core/runtime/FrameLease.js","../core/health/ProductiveHeartbeat":"core/health/ProductiveHeartbeat.js","../core/lifecycle/LifecycleSupervisor":"core/lifecycle/LifecycleSupervisor.js","../core/modules/ModuleSupervisor":"core/modules/ModuleSupervisor.js","../core/recovery/RecoveryVerifier":"core/recovery/RecoveryVerifier.js","../core/recovery/RecoveryImageGuard":"core/recovery/RecoveryImageGuard.js","../core/safety/DeploymentSafety":"core/safety/DeploymentSafety.js","../core/recovery/RecoveryCoordinator":"core/recovery/RecoveryCoordinator.js","../core/recovery/RecoveryExecutor":"core/recovery/RecoveryExecutor.js","../core/runtime/RuntimeProof":"core/runtime/RuntimeProof.js","../core/runtime/StaleCodeGuard":"core/runtime/StaleCodeGuard.js","../core/runtime/ActivationGate":"core/runtime/ActivationGate.js","../core/supervision/CoreSupervisor":"core/supervision/CoreSupervisor.js","../adapters/storage/LocalStorageKeyValueStore":"adapters/storage/LocalStorageKeyValueStore.js","../core/change-verification/createDefaultRuntime":"core/change-verification/createDefaultRuntime.js"}],
+"bootstrap/BrowserAttemptLedger.js":[function(require,module,exports){
+'use strict';
+// Persistent one-shot barrier, not a cross-tab lock. Requires a previously
+// approved session id; never silently clears reservations or retries.
+const SHA=/^[a-f0-9]{40}$/;
+const SESSION=/^[A-Za-z0-9_-]{12,80}$/;
+const ROLES=Object.freeze(['Souji','Hibari','Harutora']);
+function createBrowserAttemptLedger({storage,sessionId,owner='Rentaro',makeNonce}={}){
+ if(owner!=='Rentaro')throw Error('LEDGER_MERCHANT_OWNER_REQUIRED');
+ if(!storage||typeof storage.getItem!=='function'||typeof storage.setItem!=='function')throw Error('LEDGER_STORAGE_REQUIRED');
+ if(!SESSION.test(sessionId||''))throw Error('LEDGER_APPROVED_SESSION_REQUIRED');
+ if(typeof makeNonce!=='function')throw Error('LEDGER_SECURE_NONCE_REQUIRED');
+ function key({role,sourceCommit,releaseCommit}={}){
+  if(!ROLES.includes(role)||!SHA.test(sourceCommit||'')||!SHA.test(releaseCommit||''))throw Error('LEDGER_EXACT_IDENTITY_REQUIRED');
+  return 'pogi:order66:v3:once:'+sessionId+':'+releaseCommit+':'+sourceCommit+':'+role;
+ }
+ function has(info){
+  const item=storage.getItem(key(info));
+  // Unknown/corrupt records are consumed rather than erased/retried.
+  return item!==null;
+ }
+ function reserve(info){
+  const k=key(info);
+  if(storage.getItem(k)!==null)return false;
+  const nonce=makeNonce();
+  if(typeof nonce!=='string'||!SESSION.test(nonce))throw Error('LEDGER_NONCE_INVALID');
+  const record=JSON.stringify({schema:1,owner,sessionId,role:info.role,
+    releaseCommit:info.releaseCommit,sourceCommit:info.sourceCommit,nonce});
+  storage.setItem(k,record);
+  return storage.getItem(k)===record;
+ }
+ return Object.freeze({has,reserve,sessionId});
+}
+module.exports={createBrowserAttemptLedger};
+
+},{}],
+"bootstrap/BrowserPinnedObservation.js":[function(require,module,exports){
+'use strict';
+// Read-only First State observation. Native 'code' means a CODE runner is active;
+// readiness ALSO requires a fresh child-generated proof of both exact pins.
+const {FIGHTERS}=require('./FirstState');
+const SHA=/^[a-f0-9]{40}$/;
+const VALID=Object.freeze(['starting','loading','active','code']);
+function createBrowserPinnedObservation({sourceCommit,releaseCommit,now=Date.now,maxProofAgeMs=30000,sessionId}={}){
+ if(!SHA.test(sourceCommit||'')||!SHA.test(releaseCommit||''))throw Error('OBSERVATION_EXACT_PINS_REQUIRED');
+ if(typeof sessionId!=='string'||!/^[A-Za-z0-9_-]{12,80}$/.test(sessionId))throw Error('OBSERVATION_APPROVED_SESSION_REQUIRED');
+ if(!Number.isSafeInteger(maxProofAgeMs)||maxProofAgeMs<1000||maxProofAgeMs>120000)throw Error('OBSERVATION_AGE_POLICY_INVALID');
+ const latched=new Map();
+ function observe({nativeStates,attestations}={}){
+  if(!nativeStates||typeof nativeStates!=='object'||Array.isArray(nativeStates))throw Error('OBSERVATION_NATIVE_STATES_UNAVAILABLE');
+  if(nativeStates.Rentaro!=='self')throw Error('OBSERVATION_MERCHANT_NOT_SELF');
+  if(!attestations||typeof attestations!=='object'||Array.isArray(attestations))throw Error('OBSERVATION_PIN_PROOFS_REQUIRED');
+  const timestamp=Number(now());
+  if(!Number.isFinite(timestamp))throw Error('OBSERVATION_CLOCK_INVALID');
+  const output={};
+  for(const role of ['Rentaro',...FIGHTERS]){
+   const native=role==='Rentaro'?'self':nativeStates[role];
+   if(role!=='Rentaro'&&native!==undefined&&!VALID.includes(native))throw Error('OBSERVATION_UNKNOWN_NATIVE_STATE_'+role);
+   const occupied=native==='self'||VALID.includes(native);
+   const codeActive=native==='self'||native==='code';
+   const proof=attestations[role];
+   const identity=!!(proof&&proof.role===role&&proof.sourceCommit===sourceCommit&&
+     proof.releaseCommit===releaseCommit&&proof.sessionId===sessionId&&proof.codeLoaded===true&&
+     typeof proof.nonce==='string'&&/^[A-Za-z0-9_-]{12,80}$/.test(proof.nonce)&&
+     Number.isSafeInteger(proof.at)&&proof.at<=timestamp);
+   // Either observe a fresh direct proof, or a CM receipt whose age was verified at inbox acceptance.
+   // An accepted proof remains latched only while the same native CODE runner stays present.
+   const atReceipt=identity&&Number.isSafeInteger(proof.acceptedAt)&&
+     proof.acceptedAt>=proof.at&&proof.acceptedAt<=timestamp&&proof.acceptedAt-proof.at<=maxProofAgeMs;
+   const fresh=identity&&timestamp-proof.at<=maxProofAgeMs;
+   const prior=latched.get(role);
+   const fingerprint=identity?proof.nonce:null;
+   if(prior&&(native!==(role==='Rentaro'?'self':'code')||!identity||fingerprint!==prior)){
+    throw Error('OBSERVATION_READY_FRAME_OR_IDENTITY_LOST_'+role);
+   }
+   const pinned=codeActive&&identity&&(!!prior||atReceipt||fresh);
+   if(pinned&&!prior)latched.set(role,fingerprint);
+   output[role]=Object.freeze({online:occupied,codeLoaded:!!pinned,
+     sourceCommit:pinned?sourceCommit:null,releaseCommit:pinned?releaseCommit:null});
+  }
+  return Object.freeze(output);
+ }
+ return Object.freeze({observe,sourceCommit,releaseCommit});
+}
+module.exports={createBrowserPinnedObservation};
+
+},{"./FirstState":"bootstrap/FirstState.js"}],
+"bootstrap/BrowserRunnerAdapter.js":[function(require,module,exports){
+'use strict';
+// Order66 P1 — browser CODE runner adapter. OFF by default, no actual startup wiring.
+// Grounded in upstream adventureland_mongodb/js/runner_functions.js + js/functions.js:
+// start_character(name, slot) delegates to parent.start_character_runner;
+// successful {name} is ONLY an iframe start acknowledgement, NOT code readiness.
+const FIGHTERS=Object.freeze(['Souji','Hibari','Harutora']);
+const STATES=Object.freeze(['starting','loading','active','code']);
+function createBrowserRunnerAdapter({root,expectedOrigin='https://adventure.land',enableNativeStart=false}={}){
+  if(!root||typeof root!=='object')throw Error('BROWSER_RUNNER_ROOT_REQUIRED');
+  if(expectedOrigin!=='https://adventure.land')throw Error('BROWSER_RUNNER_APPROVED_ORIGIN_ONLY');
+  function environment(){
+    try{
+      const parent=root.parent;
+      // This is the player browser CODE iframe, not standalone Mainframe.
+      if(!parent||parent===root||!parent.document||!parent.location||!root.location){
+        return{ok:false,reason:'BROWSER_RUNNER_FRAME_UNVERIFIED'};
+      }
+      if(root.location.origin!==expectedOrigin||parent.location.origin!==expectedOrigin){
+        return{ok:false,reason:'BROWSER_RUNNER_ORIGIN_MISMATCH'};
+      }
+      if(!root.character||root.character.name!=='Rentaro')return{ok:false,reason:'BROWSER_RUNNER_RENTARO_ONLY'};
+      if(typeof root.get_active_characters!=='function'||typeof root.start_character!=='function'){
+        return{ok:false,reason:'BROWSER_RUNNER_NATIVE_API_MISSING'};
+      }
+      if(typeof parent.start_character_runner!=='function'||typeof parent.get_active_characters!=='function'){
+        return{ok:false,reason:'BROWSER_RUNNER_IFRAME_BRIDGE_MISSING'};
+      }
+      return{ok:true,kind:'BROWSER_CODE_IFRAME',origin:expectedOrigin};
+    }catch(_){return{ok:false,reason:'BROWSER_RUNNER_FRAME_INACCESSIBLE'};}
+  }
+  function activeStates(){
+    const env=environment();
+    if(!env.ok)throw Error(env.reason);
+    const states=root.get_active_characters();
+    if(!states||typeof states!=='object'||Array.isArray(states))throw Error('BROWSER_RUNNER_STATES_UNAVAILABLE');
+    if(states.Rentaro!=='self')throw Error('BROWSER_RUNNER_NOT_MERCHANT_OWNER');
+    for(const role of FIGHTERS){
+      if(Object.hasOwn(states,role)&&!STATES.includes(states[role]))throw Error('BROWSER_RUNNER_UNKNOWN_CHILD_STATE_'+role);
+    }
+    return Object.freeze(Object.fromEntries(Object.entries(states).filter(([name])=>name==='Rentaro'||FIGHTERS.includes(name))));
+  }
+  async function startChild({character,codeSlot,mode}={}){
+    if(enableNativeStart!==true)throw Error('BROWSER_RUNNER_LIVE_DISPATCH_DISABLED');
+    if(mode!=='BROWSER_SINGLE_TAB')throw Error('BROWSER_RUNNER_SINGLE_TAB_REQUIRED');
+    if(!FIGHTERS.includes(character))throw Error('BROWSER_RUNNER_INVALID_FIGHTER');
+    if(!((typeof codeSlot==='string'&&/^[A-Za-z0-9_-]{1,64}$/.test(codeSlot))||(Number.isSafeInteger(codeSlot)&&codeSlot>0))){
+      throw Error('BROWSER_RUNNER_SLOT_UNVERIFIED');
+    }
+    const states=activeStates();
+    if(Object.hasOwn(states,character))throw Error('BROWSER_RUNNER_CHILD_ALREADY_PRESENT_'+character);
+    // No retry, no stop_character, no window.open, no reload. Upstream promise
+    // resolves {name} when an iframe child starts; CODE may still be loading.
+    const result=await root.start_character(character,codeSlot);
+    if(!result||result.name!==character)throw Error('BROWSER_RUNNER_NATIVE_RECEIPT_UNCONFIRMED');
+    return Object.freeze({accepted:true,character,codeSlot,nativeReceipt:result.name,
+      codeLoaded:false,onlineConfirmed:false});
+  }
+  return Object.freeze({environment,activeStates,startChild,nativeDispatchEnabled:enableNativeStart===true});
+}
+module.exports={FIGHTERS,STATES,createBrowserRunnerAdapter};
+
+},{}],
 "bootstrap/CharacterBootstrap.js":[function(require,module,exports){
 'use strict';
 
@@ -1136,11 +1291,24 @@ async function bootstrapCharacterV3({
     };
   }
 
-  const decider=createRoleDecider({
+  const baseDecider=createRoleDecider({
     character:roleBuild.character,
     role:roleBuild.role,
     services:roleBuild.services
   });
+  // P1 user-present supervised farm session: Bank is not implemented by LiveAdapters.
+  // Never fake Bank success or route a real Merchant into an unavailable BANK state.
+  // All production modes retain their unchanged role decision policy.
+  const decider=String(activationMode).toLowerCase()==='supervised'&&
+    name==='Rentaro'&&!roleBuild.services.Bank
+    ?async context=>{
+      const decision=await baseDecider(context);
+      if(decision&&decision.state==='BANK')return{
+        state:'IDLE',reason:'P1_SUPERVISED_BANK_UNAVAILABLE_MANUAL_HOLD',
+        deferred:decision
+      };
+      return decision;
+    }:baseDecider;
   const scheduler=createRuntimeScheduler({
     coordinator:stateCoordinator,
     decide:decider,
@@ -1228,6 +1396,71 @@ async function bootstrapCharacterV3({
 module.exports={bootstrapCharacterV3};
 
 },{"./Bootstrap":"bootstrap/Bootstrap.js","./DefaultCatalog":"bootstrap/DefaultCatalog.js","../core/ownership/ResourceArbiter":"core/ownership/ResourceArbiter.js","../core/state/StateEngine":"core/state/StateEngine.js","../core/state/StateCoordinator":"core/state/StateCoordinator.js","./StateHandlers":"bootstrap/StateHandlers.js","../core/scheduler/RuntimeScheduler":"core/scheduler/RuntimeScheduler.js","../core/scheduler/RoleDecider":"core/scheduler/RoleDecider.js","../core/health/ReadinessAudit":"core/health/ReadinessAudit.js","./Manifest":"bootstrap/Manifest.js","../adapters/storage/LocalStorageKeyValueStore":"adapters/storage/LocalStorageKeyValueStore.js","../core/recovery/BankRecoveryStore":"core/recovery/BankRecoveryStore.js","../adapters/bridge/BridgeV3Contract":"adapters/bridge/BridgeV3Contract.js","../states/StateRegistry":"states/StateRegistry.js"}],
+"bootstrap/CodeReadyCm.js":[function(require,module,exports){
+'use strict';
+// P1 optional CODE message transport, intentionally not installed in LiveBootstrap.
+// Source: official Adventure Land send_cm + character.on('cm', {name,message}).
+// Sender comes from the game's CM event, NOT from user-controlled message.role.
+const ROLES=Object.freeze(['Souji','Hibari','Harutora']);
+const SHA=/^[a-f0-9]{40}$/;
+const ID=/^[A-Za-z0-9_-]{12,80}$/;
+const KIND='ORDER66_V3_CODE_READY';
+function validPins({sourceCommit,releaseCommit,sessionId}={}){
+ if(!SHA.test(sourceCommit||'')||!SHA.test(releaseCommit||'')||!ID.test(sessionId||''))throw Error('CODE_READY_PINNED_SESSION_REQUIRED');
+}
+function createCodeReadyInbox({sourceCommit,releaseCommit,sessionId,now=Date.now,maxAgeMs=30000}={}){
+ validPins({sourceCommit,releaseCommit,sessionId});
+ if(!Number.isSafeInteger(maxAgeMs)||maxAgeMs<1000||maxAgeMs>120000)throw Error('CODE_READY_INVALID_MAX_AGE');
+ const accepted=new Map();
+ function receive({name,message}={}){
+  // Invalid packets never stop or change game actions; simply discard.
+  if(!ROLES.includes(name)||!message||typeof message!=='object'||Array.isArray(message))return false;
+  const ts=Number(now());
+  if(!Number.isSafeInteger(ts))return false;
+  if(message.kind!==KIND||message.role!==name||message.sourceCommit!==sourceCommit||
+     message.releaseCommit!==releaseCommit||message.sessionId!==sessionId||
+     message.codeLoaded!==true||typeof message.nonce!=='string'||!ID.test(message.nonce)||
+     !Number.isSafeInteger(message.at)||message.at>ts||ts-message.at>maxAgeMs)return false;
+  if(accepted.has(name))return false; // one acceptance per role/session, no replay
+  accepted.set(name,Object.freeze({role:name,sourceCommit,releaseCommit,sessionId,
+    codeLoaded:true,nonce:message.nonce,at:message.at,acceptedAt:ts}));
+  return true;
+ }
+ function attestations(){return Object.freeze(Object.fromEntries(accepted));}
+ return Object.freeze({receive,attestations});
+}
+function createCodeReadyOutbox({root,sourceCommit,releaseCommit,sessionId,nonce,now=Date.now,sendCm}={}){
+ validPins({sourceCommit,releaseCommit,sessionId});
+ if(!root||!root.character||!ROLES.includes(root.character.name))throw Error('CODE_READY_FIGHTER_ONLY');
+ if(typeof nonce!=='string'||!ID.test(nonce))throw Error('CODE_READY_SECURE_NONCE_REQUIRED');
+ if(typeof sendCm!=='function')throw Error('CODE_READY_SEND_API_REQUIRED');
+ const role=root.character.name;
+ let attempted=false;
+ async function sendOnce(){
+  if(attempted)throw Error('CODE_READY_ALREADY_ATTEMPTED');
+  // The currently published inert bundles don't set releaseCommit on the loader.
+  // This must stay blocked until a newer reviewed loader attests both pins.
+  const loader=root.__POGI_V3_LOADER_STATUS,delivery=root.__POGI_V3_DELIVERY;
+  if(!loader||loader.ok!==true||loader.installed!==true||!/^[a-f0-9]{64}$/.test(loader.sha256||'')||loader.releaseCommit!==releaseCommit||
+     loader.sourceCommit!==sourceCommit||loader.role!==role||
+     !delivery||delivery.installed!==true||delivery.role!==role||
+     delivery.sourceCommit!==sourceCommit||delivery.autoStarted!==false){
+    throw Error('CODE_READY_VERIFIED_LOADER_REQUIRED');
+  }
+  const at=Number(now());if(!Number.isSafeInteger(at))throw Error('CODE_READY_INVALID_CLOCK');
+  attempted=true; // exactly one outbound attempt, including uncertain deliveries
+  const message=Object.freeze({kind:KIND,role,sourceCommit,releaseCommit,sessionId,codeLoaded:true,nonce,at});
+  const receipt=await sendCm('Rentaro',message);
+  // May deliver locally despite server rejection, so never retry if unknown.
+  const receivers=receipt&&receipt.receivers;
+  return Object.freeze({ok:Array.isArray(receivers)&&receivers.includes('Rentaro'),attempted:true,
+    confirmed:!!(Array.isArray(receivers)&&receivers.includes('Rentaro'))});
+ }
+ return Object.freeze({sendOnce,status:()=>({role,attempted})});
+}
+module.exports={KIND,createCodeReadyInbox,createCodeReadyOutbox};
+
+},{}],
 "bootstrap/DefaultCatalog.js":[function(require,module,exports){
 'use strict';
 
@@ -1635,6 +1868,69 @@ function createDefaultCatalog(){
 module.exports={createDefaultCatalog};
 
 },{"../core/modules/ModuleCatalog":"core/modules/ModuleCatalog.js","../ligaments/movement/MovementService":"ligaments/movement/MovementService.js","../ligaments/inventory/InventoryService":"ligaments/inventory/InventoryService.js","../ligaments/targeting/TargetingService":"ligaments/targeting/TargetingService.js","../ligaments/party/PartyCoordinationService":"ligaments/party/PartyCoordinationService.js","../ligaments/skills/CooldownService":"ligaments/skills/CooldownService.js","../ligaments/skills/MluckService":"ligaments/skills/MluckService.js","../ligaments/gear/GearService":"ligaments/gear/GearService.js","../ligaments/crafting/RecipeIntelligence":"ligaments/crafting/RecipeIntelligence.js","../ligaments/combat/CombatService":"ligaments/combat/CombatService.js","../ligaments/combat/FighterActionExecutor":"ligaments/combat/FighterActionExecutor.js","../organs/farm/FarmState":"organs/farm/FarmState.js","../organs/stand/StandState":"organs/stand/StandState.js","../organs/bank/BankState":"organs/bank/BankState.js","../organs/bank/BankNavigation":"organs/bank/BankNavigation.js","../organs/bank/BankTravelOps":"organs/bank/BankTravelOps.js","../ligaments/gear/GearHandoffService":"ligaments/gear/GearHandoffService.js","../ligaments/gear/GearHandoffPlanner":"ligaments/gear/GearHandoffPlanner.js","../ligaments/shop/ShopLimb":"ligaments/shop/ShopLimb.js","../ligaments/shop/ShopService":"ligaments/shop/ShopService.js","../ligaments/shop/ShopBankHandoff":"ligaments/shop/ShopBankHandoff.js","../organs/bank/BankStoreOps":"organs/bank/BankStoreOps.js","../organs/bank/BankRetrieveOps":"organs/bank/BankRetrieveOps.js","../organs/bank/BankHandoffOps":"organs/bank/BankHandoffOps.js","../organs/bosses/ScanBossState":"organs/bosses/ScanBossState.js","../organs/bosses/BossPolicy":"organs/bosses/BossPolicy.js","../organs/bosses/BossMissionCoordinator":"organs/bosses/BossMissionCoordinator.js","../organs/bosses/WorldBossState":"organs/bosses/WorldBossState.js","../organs/events/EventState":"organs/events/EventState.js","../organs/pvp-defense/DefensivePvp":"organs/pvp-defense/DefensivePvp.js","../organs/gear/GearControlPlane":"organs/gear/GearControlPlane.js","../organs/gear/GearProductionExecutor":"organs/gear/GearProductionExecutor.js","../characters/merchant/MerchantController":"characters/merchant/MerchantController.js","../characters/priest/PriestController":"characters/priest/PriestController.js","../characters/mage/MageController":"characters/mage/MageController.js","../characters/warrior/WarriorController":"characters/warrior/WarriorController.js"}],
+"bootstrap/FirstState.js":[function(require,module,exports){
+'use strict';
+// Order66 P1 startup contract only. No game APIs, eval, timers or actual child launches.
+// Skeleton Central will own dispatch; First State only plans approved one-shot transitions.
+const FIGHTERS=Object.freeze(['Souji','Hibari','Harutora']);
+const PARENT='Rentaro';
+const SHA=/^[a-f0-9]{40}$/;
+function createFirstState({sourceCommit,releaseCommit}={}){
+ if(!SHA.test(sourceCommit||'')||!SHA.test(releaseCommit||''))throw Error('FIRST_STATE_RELEASE_PIN_REQUIRED');
+ const requested=new Set(),ready=new Set();
+ let stopped=false,reason=null,pendingLaunch=null;
+ function fail(cause){
+  stopped=true;reason=String(cause||'FAIL_CLOSED');
+  return Object.freeze({kind:'STOP',reason,hasSideEffects:false});
+ }
+ function identityOk(observation){
+  return observation&&observation.sourceCommit===sourceCommit&&observation.releaseCommit===releaseCommit;
+ }
+ function safeObservation(observations,role){
+  const o=observations&&observations[role];
+  if(!o||o.online!==true)return{kind:'WAIT_ONLINE',role,hasSideEffects:false};
+  if(o.codeLoaded!==true)return{kind:'WAIT_CODE_LOADED',role,hasSideEffects:false};
+  if(!identityOk(o))return{kind:'PIN_MISMATCH',role,hasSideEffects:false};
+  return{kind:'READY',role,hasSideEffects:false};
+ }
+ function plan(observations={}){
+  if(stopped)return Object.freeze({kind:'STOP',reason,hasSideEffects:false});
+  const merchant=safeObservation(observations,PARENT);
+  if(merchant.kind==='PIN_MISMATCH')return fail('RENTARO_PIN_MISMATCH');
+  if(merchant.kind!=='READY')return Object.freeze({...merchant,role:PARENT});
+  for(const role of FIGHTERS){
+   const child=safeObservation(observations,role);
+   if(child.kind==='PIN_MISMATCH')return fail(role+'_PIN_MISMATCH');
+   if(child.kind==='READY'){ready.add(role);continue;}
+   if(!requested.has(role)){
+    // Already connected but still loading CODE: never restart that fighter.
+    if(child.kind==='WAIT_CODE_LOADED')return Object.freeze({...child,role});
+    pendingLaunch=role;
+    return Object.freeze({kind:'REQUEST_SINGLE_LAUNCH',role,hasSideEffects:false,requiresApproval:true});
+   }
+   return Object.freeze({...child,role});
+  }
+  return Object.freeze({kind:'HANDOFF_READY',roles:[PARENT,...FIGHTERS],sourceCommit,releaseCommit,hasSideEffects:false,healthChecked:false});
+ }
+ function acknowledgeLaunch(role){
+  if(stopped)throw Error('FIRST_STATE_STOPPED');
+  if(!FIGHTERS.includes(role))throw Error('FIRST_STATE_INVALID_FIGHTER');
+  if(requested.has(role))throw Error('FIRST_STATE_DUPLICATE_LAUNCH');
+  if(pendingLaunch!==role)throw Error('FIRST_STATE_DISPATCH_NOT_PLANNED');
+  // Caller must first obtain REQUEST_SINGLE_LAUNCH from plan and explicitly authorize native dispatch.
+  if(FIGHTERS.slice(0,FIGHTERS.indexOf(role)).some(r=>!ready.has(r)))throw Error('FIRST_STATE_LAUNCH_ORDER');
+  requested.add(role);
+  pendingLaunch=null;
+  return Object.freeze({kind:'LAUNCH_RECORDED',role,hasSideEffects:false});
+ }
+ function snapshot(){
+  return Object.freeze({stopped,reason,pendingLaunch,requested:[...requested],ready:[...ready],sourceCommit,releaseCommit});
+ }
+ return Object.freeze({plan,acknowledgeLaunch,snapshot});
+}
+module.exports={PARENT,FIGHTERS,createFirstState};
+
+},{}],
 "bootstrap/LiveBootstrap.js":[function(require,module,exports){
 'use strict';
 
@@ -1830,6 +2126,362 @@ module.exports=Object.freeze({
 });
 
 },{}],
+"bootstrap/OneTabLaunchBoundary.js":[function(require,module,exports){
+'use strict';
+// P1 controlled dispatch boundary. Not connected to LiveBootstrap or any game CODE.
+// A future user-present adapter may supply a verified, one-tab-only startChild API.
+const {createSkeletonCentral}=require('./SkeletonCentral');
+const FIGHTERS=Object.freeze(['Souji','Hibari','Harutora']);
+const SHA=/^[a-f0-9]{40}$/;
+function createOneTabLaunchBoundary({
+  merchant='Rentaro',sourceCommit,releaseCommit,mode,
+  startChild,codeSlots,attemptLedger,now=Date.now
+}={}){
+  if(merchant!=='Rentaro')throw Error('ONE_TAB_MERCHANT_OWNER_REQUIRED');
+  if(!SHA.test(sourceCommit||'')||!SHA.test(releaseCommit||''))throw Error('ONE_TAB_EXACT_PINS_REQUIRED');
+  if(mode!=='BROWSER_SINGLE_TAB')throw Error('ONE_TAB_VERIFIED_BROWSER_MODE_REQUIRED');
+  if(typeof startChild!=='function')throw Error('ONE_TAB_NATIVE_ADAPTER_REQUIRED');
+  const validSlot=slot=>(Number.isSafeInteger(slot)&&slot>0)||
+    (typeof slot==='string'&&/^[A-Za-z0-9_-]{1,64}$/.test(slot));
+  if(!codeSlots||FIGHTERS.some(role=>!validSlot(codeSlots[role]))){
+    throw Error('ONE_TAB_VERIFIED_FIGHTER_CODE_SLOTS_REQUIRED');
+  }
+  if(!attemptLedger||typeof attemptLedger.has!=='function'||typeof attemptLedger.reserve!=='function'){
+    throw Error('ONE_TAB_PERSISTENT_ATTEMPT_LEDGER_REQUIRED');
+  }
+  const central=createSkeletonCentral({merchant,sourceCommit,releaseCommit});
+  const attempted=new Set();
+  let inFlight=null,stopped=false,reason=null;
+  function stop(cause){stopped=true;reason=String(cause||'STARTUP_STOPPED');return status();}
+  function status(){return Object.freeze({...central.snapshot(),stopped,reason,inFlight,attempted:[...attempted]});}
+  function inspect(observations={}){
+    if(stopped)return Object.freeze({kind:'STOP',reason,hasSideEffects:false});
+    if(inFlight)return Object.freeze({kind:'WAIT_DISPATCH_RESULT',role:inFlight,hasSideEffects:false});
+    const step=central.inspect(observations);
+    if(step.kind==='REQUEST_SINGLE_LAUNCH'){
+      try{
+        if(attempted.has(step.role)||attemptLedger.has({role:step.role,sourceCommit,releaseCommit})!==false){
+          return Object.freeze({kind:'STOP',reason:'ONE_TAB_ALREADY_ATTEMPTED_'+step.role,hasSideEffects:false});
+        }
+      }catch(_){return Object.freeze({kind:'STOP',reason:'ONE_TAB_LEDGER_UNREADABLE',hasSideEffects:false});}
+    }
+    return step;
+  }
+  async function dispatchOnce({role,observations={},approval}={}){
+    if(stopped)throw Error('ONE_TAB_STOPPED');
+    if(inFlight)throw Error('ONE_TAB_ALREADY_DISPATCHING');
+    if(!FIGHTERS.includes(role))throw Error('ONE_TAB_INVALID_FIGHTER');
+    if(attempted.has(role))throw Error('ONE_TAB_DUPLICATE_DISPATCH');
+    if(!approval||approval.userPresent!==true||approval.sourceCommit!==sourceCommit||approval.releaseCommit!==releaseCommit||approval.role!==role){
+      throw Error('ONE_TAB_EXPLICIT_PINNED_APPROVAL_REQUIRED');
+    }
+    const step=central.inspect(observations);
+    if(step.kind!=='REQUEST_SINGLE_LAUNCH'||step.role!==role)throw Error('ONE_TAB_WRONG_STARTUP_STATE');
+    if(inspect(observations).kind!=='REQUEST_SINGLE_LAUNCH')throw Error('ONE_TAB_ALREADY_ATTEMPTED_OR_LEDGER_UNAVAILABLE');
+    const slot=codeSlots[role];
+    // Mark attempted *before* the native call: even an exception must not retry.
+    attempted.add(role);inFlight=role;
+    try{
+      // Persist the one-shot fence before calling the native game API.
+      // A restarted CODE runner must never reissue an ambiguous start.
+      if(attemptLedger.reserve({role,sourceCommit,releaseCommit})!==true){
+        stop('ONE_TAB_LEDGER_RESERVATION_FAILED_'+role);
+        return Object.freeze({ok:false,reason,status:status()});
+      }
+      const receipt=await startChild({character:role,codeSlot:slot,mode:'BROWSER_SINGLE_TAB'});
+      if(!receipt||receipt.accepted!==true||receipt.character!==role||receipt.codeSlot!==slot){
+        stop('ONE_TAB_NATIVE_START_UNCONFIRMED_'+role);
+        return Object.freeze({ok:false,reason,status:status()});
+      }
+      central.recordApprovedDispatch({role,observations,userPresentApproval:true,nativeStartAcknowledged:true});
+      return Object.freeze({ok:true,kind:'NATIVE_START_REQUESTED',role,codeSlot:slot,at:Number(now()),
+        next:'WAIT_FOR_ONLINE_AND_PINNED_CODE',autoRetry:false,healthChecked:false});
+    }catch(e){
+      stop('ONE_TAB_NATIVE_DISPATCH_FAILED_'+role);
+      return Object.freeze({ok:false,reason,error:String(e&&e.message||e),status:status()});
+    }finally{inFlight=null;}
+  }
+  return Object.freeze({inspect,dispatchOnce,status});
+}
+module.exports={FIGHTERS,createOneTabLaunchBoundary};
+
+},{"./SkeletonCentral":"bootstrap/SkeletonCentral.js"}],
+"bootstrap/P1StartupSession.js":[function(require,module,exports){
+'use strict';
+// One Rentaro-owned, manually approved V3 startup session. No timers, retries, Recovery or browser management.
+const {createBrowserRunnerAdapter}=require('./BrowserRunnerAdapter');
+const {createBrowserAttemptLedger}=require('./BrowserAttemptLedger');
+const {createBrowserPinnedObservation}=require('./BrowserPinnedObservation');
+const {createOneTabLaunchBoundary}=require('./OneTabLaunchBoundary');
+const {createCodeReadyInbox}=require('./CodeReadyCm');
+const ROLES=Object.freeze(['Souji','Hibari','Harutora']);
+const GAMEPLAY_READY='ORDER66_V3_GAMEPLAY_READY';
+const SHA=/^[a-f0-9]{40}$/, ID=/^[A-Za-z0-9_-]{12,80}$/;
+function createP1StartupSession({root,sourceCommit,releaseCommit,sessionId,codeSlots,
+  makeNonce,now=Date.now,maxWaitMs=120000,enableNativeStart=false,
+  approval,onHandoff=null,setIntervalFn=setInterval,clearIntervalFn=clearInterval,
+  setTimeoutFn=setTimeout,clearTimeoutFn=clearTimeout,pollMs=2000}={}){
+ if(!SHA.test(sourceCommit||'')||!SHA.test(releaseCommit||'')||!ID.test(sessionId||''))throw Error('P1_PINNED_SESSION_REQUIRED');
+ if(!Number.isSafeInteger(maxWaitMs)||maxWaitMs<1000||maxWaitMs>600000)throw Error('P1_WAIT_LIMIT_INVALID');
+ if(!Number.isSafeInteger(pollMs)||pollMs<500||pollMs>10000)throw Error('P1_POLL_INTERVAL_INVALID');
+ if(!approval||approval.userPresent!==true||approval.sessionId!==sessionId||
+   approval.sourceCommit!==sourceCommit||approval.releaseCommit!==releaseCommit||
+   approval.singleTab!==true||approval.noRecovery!==true)throw Error('P1_EXPLICIT_SUPERVISED_APPROVAL_REQUIRED');
+ const adapter=createBrowserRunnerAdapter({root,enableNativeStart});
+ const env=adapter.environment();if(!env.ok)throw Error(env.reason);
+ if(!root.localStorage)throw Error('P1_STORAGE_REQUIRED');
+ if(!root.character||typeof root.character.on!=='function')throw Error('P1_CM_RECEIVER_REQUIRED');
+ // A CODE restart or a second Rentaro controller must not take ownership silently.
+ if(root.__POGI_V3_P1_ACTIVE_OWNER)throw Error('P1_ANOTHER_OWNER_ACTIVE');
+ const ownerKey='pogi:order66:v3:startup_owner:'+sessionId;
+ if(root.localStorage.getItem(ownerKey)!==null)throw Error('P1_SESSION_OWNER_PREVIOUSLY_USED_MANUAL_REVIEW');
+ const ownerNonce=makeNonce();
+ if(!ID.test(ownerNonce||''))throw Error('P1_OWNER_NONCE_REQUIRED');
+ const ownerRecord=JSON.stringify({schema:1,owner:'Rentaro',sessionId,sourceCommit,releaseCommit,nonce:ownerNonce});
+ root.localStorage.setItem(ownerKey,ownerRecord);
+ if(root.localStorage.getItem(ownerKey)!==ownerRecord)throw Error('P1_OWNER_FENCE_UNCONFIRMED');
+ root.__POGI_V3_P1_ACTIVE_OWNER=sessionId;
+ const ledger=createBrowserAttemptLedger({storage:root.localStorage,sessionId,makeNonce});
+ const inbox=createCodeReadyInbox({sourceCommit,releaseCommit,sessionId,now});
+ const observer=createBrowserPinnedObservation({sourceCommit,releaseCommit,sessionId,now});
+ const boundary=createOneTabLaunchBoundary({sourceCommit,releaseCommit,mode:'BROWSER_SINGLE_TAB',
+   codeSlots,startChild:adapter.startChild,attemptLedger:ledger});
+ const startedAt=Number(now());
+ let state='PENDING',reason=null,failedAt=null,handoffAttempted=false,dispatchAt=null,lastRole=null;
+ let interval=null,ticking=false,runtimeWait=null;
+ const gameplayReady=new Map();
+ const statusByRole=Object.fromEntries(ROLES.map(r=>[r,'PENDING']));
+ const merchantIdentity=()=>{
+  const l=root.__POGI_V3_LOADER_STATUS,d=root.__POGI_V3_DELIVERY;
+  if(!l||l.ok!==true||l.installed!==true||!(/^[a-f0-9]{64}$/.test(l.sha256||''))||
+     l.role!=='Rentaro'||l.sourceCommit!==sourceCommit||l.releaseCommit!==releaseCommit||
+     !d||d.installed!==true||d.fullGraph!==true||d.autoStarted!==false||
+     d.role!=='Rentaro'||d.sourceCommit!==sourceCommit)throw Error('P1_RENTARO_VERIFIED_LOADER_REQUIRED');
+  return {role:'Rentaro',sourceCommit,releaseCommit,sessionId,nonce:sessionId,at:startedAt,
+    acceptedAt:startedAt,codeLoaded:true};
+ };
+ function fail(error){if(runtimeWait)runtimeWait.finish(false);if(state!=='FAILED_MANUAL_REVIEW')failedAt=Number(now());state='FAILED_MANUAL_REVIEW';reason=String(error||'P1_UNKNOWN_FAILURE');return status();}
+ function status(){return Object.freeze({state,reason,sessionId,sourceCommit,releaseCommit,
+   owner:'Rentaro',roles:{...statusByRole},gameplayRuntimeReady:[...gameplayReady.keys()],lastRole,dispatchAt,failedAt,handoffAttempted,polling:interval!==null,
+   noRecovery:true,autoRetry:false});}
+ function snapshot(){return observer.observe({nativeStates:adapter.activeStates(),
+   attestations:{Rentaro:merchantIdentity(),...inbox.attestations()}});}
+ function checkDeadline(){
+  if(state==='START_REQUESTED'&&dispatchAt!==null&&Number(now())-dispatchAt>maxWaitMs){
+   fail('P1_CODE_READY_TIMEOUT_'+lastRole);return true;
+  }
+  return false;
+ }
+ function receiveCm(event){
+  const role=event&&event.name,m=event&&event.message;
+  if(m&&m.kind===GAMEPLAY_READY){
+   if(state!=='HANDOFF_READY'||handoffAttempted!==true||!ROLES.includes(role)||
+      statusByRole[role]!=='CODE_READY'||gameplayReady.has(role)||m.role!==role||
+      m.sourceCommit!==sourceCommit||m.releaseCommit!==releaseCommit||
+      m.sessionId!==sessionId||m.runtimeReady!==true||
+      !ID.test(m.nonce||'')||!Number.isSafeInteger(m.at))return false;
+   const at=Number(now());
+   if(!Number.isSafeInteger(at)||m.at>at||at-m.at>30000)return false;
+   try{
+    if(adapter.activeStates()[role]!=='code')return fail('P1_GAMEPLAY_READY_NATIVE_FRAME_MISSING_'+role),false;
+   }catch(_){fail('P1_GAMEPLAY_READY_NATIVE_STATES_UNREADABLE');return false;}
+   gameplayReady.set(role,Object.freeze({nonce:m.nonce,at:m.at}));
+   if(gameplayReady.size===ROLES.length&&runtimeWait)runtimeWait.finish(true);
+   return true;
+  }
+  if(state==='FAILED_MANUAL_REVIEW'||state==='HANDOFF_READY'||state==='HANDED_OFF')return false;
+  return inbox.receive(event);
+ }
+ function awaitRuntimeReady(){
+  if(state!=='HANDOFF_READY'||handoffAttempted!==true)return Promise.resolve(false);
+  if(gameplayReady.size===ROLES.length)return Promise.resolve(true);
+  if(runtimeWait)return Promise.resolve(false);
+  return new Promise(resolve=>{
+   const token=setTimeoutFn(()=>{if(runtimeWait)runtimeWait.finish(false);},maxWaitMs);
+   runtimeWait={finish(ok){clearTimeoutFn(token);runtimeWait=null;resolve(ok===true);}};
+  });
+ }
+ root.character.on('cm',receiveCm);
+ async function advance(){
+  if(state==='FAILED_MANUAL_REVIEW'||state==='HANDED_OFF')return status();
+  if(checkDeadline())return status();
+  try{
+   const obs=snapshot(),step=boundary.inspect(obs);
+   if(step.kind==='STOP')return fail(step.reason);
+   for(const role of ROLES){if(obs[role].codeLoaded)statusByRole[role]='CODE_READY';}
+   if(step.kind==='HANDOFF_READY'){
+    state='HANDOFF_READY';lastRole=null;dispatchAt=null;return status();
+   }
+   if(step.kind==='REQUEST_SINGLE_LAUNCH'){
+    if(enableNativeStart!==true)return fail('P1_NATIVE_START_NOT_APPROVED');
+    const response=await boundary.dispatchOnce({role:step.role,observations:obs,
+      approval:{userPresent:true,role:step.role,sourceCommit,releaseCommit}});
+    if(!response.ok)return fail(response.reason);
+    state='START_REQUESTED';lastRole=step.role;dispatchAt=Number(now());
+    statusByRole[step.role]='START_REQUESTED';return status();
+   }
+   if(step.kind==='WAIT_CODE_LOADED'||step.kind==='WAIT_ONLINE'){
+    state='START_REQUESTED';if(dispatchAt===null){dispatchAt=Number(now());lastRole=step.role;}return status();
+   }
+   return fail('P1_UNEXPECTED_PLAN_'+step.kind);
+  }catch(e){return fail(e&&e.message||e);}
+ }
+ async function handoffOnce(){
+  if(handoffAttempted)return fail('P1_HANDOFF_ALREADY_ATTEMPTED');
+  if(state!=='HANDOFF_READY')return fail('P1_HANDOFF_BEFORE_ALL_CODE_READY');
+  if(typeof onHandoff!=='function')return fail('P1_GAMEPLAY_HANDOFF_NOT_CONFIGURED');
+  handoffAttempted=true;
+  try{
+   const out=await onHandoff({sessionId,sourceCommit,releaseCommit,roles:['Rentaro',...ROLES],
+      mode:'supervised',noRecovery:true,userPresent:true,awaitRuntimeReady});
+   if(!out||out.ok!==true)return fail('P1_HANDOFF_UNCONFIRMED');
+   state='HANDED_OFF';return status();
+  }catch(e){return fail('P1_HANDOFF_FAILED_'+String(e&&e.message||e));}
+ }
+ // Poll only observational state; every native start is still fenced once.
+ function stopPolling(){if(interval!==null){clearIntervalFn(interval);interval=null;}}
+ async function managedTick(){
+  if(ticking)return status();
+  ticking=true;
+  try{
+   const next=await advance();
+   if(next.state==='HANDOFF_READY'){stopPolling();return await handoffOnce();}
+   if(next.state==='FAILED_MANUAL_REVIEW'||next.state==='HANDED_OFF')stopPolling();
+   return status();
+  }finally{ticking=false;}
+ }
+ async function runApprovedSequence(){
+  if(interval!==null||state!=='PENDING')return{ok:false,reason:'P1_SEQUENCE_ALREADY_STARTED'};
+  if(enableNativeStart!==true)return{ok:false,reason:'P1_NATIVE_START_NOT_APPROVED'};
+  interval=setIntervalFn(()=>{void managedTick();},pollMs);
+  return managedTick();
+ }
+ function manualAbort(){stopPolling();return fail('P1_USER_MANUAL_ABORT');}
+ function manualReconcile({newSessionId,approval:nextApproval}={}){
+  if(state!=='FAILED_MANUAL_REVIEW')return{ok:false,reason:'P1_NOT_IN_MANUAL_HOLD'};
+  if(!ID.test(newSessionId||'')||newSessionId===sessionId||!nextApproval||
+     nextApproval.userPresent!==true||nextApproval.sessionId!==newSessionId||
+     nextApproval.sourceCommit!==sourceCommit||nextApproval.releaseCommit!==releaseCommit||
+     nextApproval.singleTab!==true||nextApproval.noRecovery!==true)return{ok:false,reason:'P1_NEW_APPROVED_SESSION_REQUIRED'};
+  try{
+   if(failedAt===null||Number(now())-failedAt<30000)return{ok:false,reason:'P1_MANUAL_QUIESCENCE_REQUIRED'};
+   const native=adapter.activeStates();
+   if(ROLES.some(role=>Object.hasOwn(native,role)))return{ok:false,reason:'P1_CHILD_STILL_PRESENT_MANUAL_REVIEW'};
+   merchantIdentity();
+   if(root.__POGI_V3_P1_ACTIVE_OWNER!==sessionId)return{ok:false,reason:'P1_OWNER_IDENTITY_CHANGED'};
+   delete root.__POGI_V3_P1_ACTIVE_OWNER; // explicit operator reconciliation; durable old fence remains.
+   return{ok:true,newSessionId,oldSessionPreserved:true,requiresNewController:true};
+  }catch(e){return{ok:false,reason:String(e&&e.message||e)};}
+ }
+ return Object.freeze({advance,receiveCm,snapshot,status,handoffOnce,manualReconcile,runApprovedSequence,manualAbort});
+}
+module.exports={createP1StartupSession};
+
+},{"./BrowserRunnerAdapter":"bootstrap/BrowserRunnerAdapter.js","./BrowserAttemptLedger":"bootstrap/BrowserAttemptLedger.js","./BrowserPinnedObservation":"bootstrap/BrowserPinnedObservation.js","./OneTabLaunchBoundary":"bootstrap/OneTabLaunchBoundary.js","./CodeReadyCm":"bootstrap/CodeReadyCm.js"}],
+"bootstrap/P1SupervisedRole.js":[function(require,module,exports){
+'use strict';
+// Fighter counterpart for the one approved Rentaro startup. No runtime before verified GO.
+const {createCodeReadyOutbox}=require('./CodeReadyCm');
+const GO='ORDER66_V3_GAMEPLAY_GO';
+const GAMEPLAY_READY='ORDER66_V3_GAMEPLAY_READY';
+const SHA=/^[a-f0-9]{40}$/, ID=/^[A-Za-z0-9_-]{12,80}$/;
+function createP1SupervisedRole({root,sourceCommit,releaseCommit,sessionId,nonce,
+ approval,now=Date.now,startRuntime}={}){
+ const role=root&&root.character&&root.character.name;
+ if(!['Souji','Hibari','Harutora'].includes(role))throw Error('P1_FIGHTER_ROLE_REQUIRED');
+ if(!SHA.test(sourceCommit||'')||!SHA.test(releaseCommit||'')||!ID.test(sessionId||'')||
+  !ID.test(nonce||''))throw Error('P1_FIGHTER_PINS_REQUIRED');
+ if(!approval||approval.userPresent!==true||approval.singleTab!==true||approval.noRecovery!==true||
+  approval.sessionId!==sessionId||approval.sourceCommit!==sourceCommit||approval.releaseCommit!==releaseCommit)
+  throw Error('P1_FIGHTER_SUPERVISED_APPROVAL_REQUIRED');
+ if(typeof startRuntime!=='function'||!root.localStorage||typeof root.send_cm!=='function'||
+  typeof root.character.on!=='function')throw Error('P1_FIGHTER_NATIVE_APIS_REQUIRED');
+ const outbox=createCodeReadyOutbox({root,sourceCommit,releaseCommit,sessionId,nonce,now,
+   sendCm:(to,message)=>root.send_cm(to,message)});
+ const proofFence='pogi:order66:v3:code_proof:'+sessionId+':'+releaseCommit+':'+sourceCommit+':'+role;
+ const fence='pogi:order66:v3:gameplay:'+sessionId+':'+releaseCommit+':'+sourceCommit+':'+role;
+ let state='WAIT_RENTARO_HANDOFF',reason=null;
+ function status(){return Object.freeze({role,state,reason,sessionId,autoRetry:false});}
+ async function receiveGo(event){
+  if(state!=='WAIT_RENTARO_HANDOFF')return status();
+  const m=event&&event.message,t=Number(now());
+  if(!event||event.name!=='Rentaro'||!m||m.kind!==GO||m.role!==role||
+    m.sourceCommit!==sourceCommit||m.releaseCommit!==releaseCommit||m.sessionId!==sessionId||
+    !Number.isSafeInteger(m.at)||m.at>t||t-m.at>30000||!ID.test(m.nonce||''))return status();
+  const loader=root.__POGI_V3_LOADER_STATUS,delivery=root.__POGI_V3_DELIVERY;
+  if(!loader||loader.ok!==true||loader.installed!==true||!/^[a-f0-9]{64}$/.test(loader.sha256||'')||
+    loader.role!==role||loader.sourceCommit!==sourceCommit||loader.releaseCommit!==releaseCommit||
+    !delivery||delivery.installed!==true||delivery.autoStarted!==false||delivery.role!==role||
+    delivery.sourceCommit!==sourceCommit){state='FAILED_MANUAL_REVIEW';reason='P1_FIGHTER_PIN_LOST';return status();}
+  try{
+   if(root.localStorage.getItem(fence)!==null){state='FAILED_MANUAL_REVIEW';reason='P1_FIGHTER_GAMEPLAY_ALREADY_ATTEMPTED';return status();}
+   root.localStorage.setItem(fence,JSON.stringify({schema:1,sessionId,role,sourceCommit,releaseCommit}));
+   if(root.localStorage.getItem(fence)===null)throw Error('P1_GAMEPLAY_FENCE_UNAVAILABLE');
+   state='STARTING_GAMEPLAY';
+   root.__POGI_V3_SUPERVISED_APPROVAL={...approval,character:role};
+   const result=await startRuntime({root,character:role,frameId:'p1_'+sessionId+'_'+role,
+      activationMode:'supervised',requireCompleteRole:true});
+   if(!result||result.ok!==true||!result.runtime||!result.runtime.scheduler){
+    state='FAILED_MANUAL_REVIEW';reason='P1_FIGHTER_RUNTIME_BOOT_FAILED';return status();
+   }
+   const readiness=result.runtime.readiness();
+   if(!readiness.ok){await result.runtime.shutdown();state='FAILED_MANUAL_REVIEW';reason='P1_FIGHTER_RUNTIME_NOT_READY';return status();}
+   result.runtime.scheduler.start();
+   if(typeof result.runtime.scheduler.status!=='function'||
+      result.runtime.scheduler.status().running!==true){
+    state='FAILED_MANUAL_REVIEW';reason='P1_FIGHTER_SCHEDULER_NOT_RUNNING';return status();
+   }
+   state='GAMEPLAY_ACTIVE';
+   // A GO delivery receipt is not proof of a running V3 scheduler.
+   // Send a separate one-shot authenticated fighter readiness acknowledgment.
+   const ack={kind:GAMEPLAY_READY,role,sourceCommit,releaseCommit,sessionId,
+     nonce,at:Number(now()),runtimeReady:true};
+   const response=await root.send_cm('Rentaro',ack);
+   if(!response||!Array.isArray(response.receivers)||!response.receivers.includes('Rentaro')){
+    state='FAILED_MANUAL_REVIEW';reason='P1_FIGHTER_RUNTIME_READY_CM_UNCONFIRMED';return status();
+   }
+   return status();
+  }catch(e){state='FAILED_MANUAL_REVIEW';reason='P1_FIGHTER_GAMEPLAY_ERROR_'+String(e&&e.message||e);return status();}
+ }
+ // Persist before CM send. A fighter CODE reload cannot repeat an uncertain proof.
+ async function sendReadyOnce(){
+  if(root.localStorage.getItem(proofFence)!==null)throw Error('P1_FIGHTER_PROOF_ALREADY_ATTEMPTED');
+  const record=JSON.stringify({schema:1,sessionId,role,sourceCommit,releaseCommit});
+  root.localStorage.setItem(proofFence,record);
+  if(root.localStorage.getItem(proofFence)!==record)throw Error('P1_FIGHTER_PROOF_FENCE_UNCONFIRMED');
+  return outbox.sendOnce();
+ }
+ root.character.on('cm',event=>{void receiveGo(event);});
+ return Object.freeze({sendReadyOnce,receiveGo,status});
+}
+module.exports={GO,GAMEPLAY_READY,createP1SupervisedRole};
+
+},{"./CodeReadyCm":"bootstrap/CodeReadyCm.js"}],
+"bootstrap/SkeletonCentral.js":[function(require,module,exports){
+'use strict';
+// Order66 Phase 1: Merchant-owned planning facade. NO native game actions here.
+const {createFirstState}=require('./FirstState');
+function createSkeletonCentral({merchant='Rentaro',sourceCommit,releaseCommit}={}){
+ if(merchant!=='Rentaro')throw Error('SKELETON_CENTRAL_MERCHANT_OWNER_ONLY');
+ const startup=createFirstState({sourceCommit,releaseCommit});
+ function inspect(observations={}){
+  const step=startup.plan(observations);
+  return Object.freeze({...step,owner:merchant,sourceCommit,releaseCommit,dispatchExecuted:false});
+ }
+ function recordApprovedDispatch({role,observations,userPresentApproval=false,nativeStartAcknowledged=false}={}){
+  if(userPresentApproval!==true)throw Error('SKELETON_CENTRAL_USER_APPROVAL_REQUIRED');
+  if(nativeStartAcknowledged!==true)throw Error('SKELETON_CENTRAL_NATIVE_START_NOT_ACKNOWLEDGED');
+  const expected=startup.plan(observations);
+  if(expected.kind!=='REQUEST_SINGLE_LAUNCH'||expected.role!==role)throw Error('SKELETON_CENTRAL_NOT_NEXT_ROLE');
+  // Log a dispatch *already performed* by a future explicit native boundary.
+  // This method MUST NOT call start_character or login APIs.
+  return startup.acknowledgeLaunch(role);
+ }
+ return Object.freeze({inspect,recordApprovedDispatch,snapshot:startup.snapshot});
+}
+module.exports={createSkeletonCentral};
+
+},{"./FirstState":"bootstrap/FirstState.js"}],
 "bootstrap/StateHandlers.js":[function(require,module,exports){
 'use strict';
 
@@ -4835,6 +5487,23 @@ function createActivationGate({manifest,staleGuard}={}){
       if(bridge.bridge&&bridge.bridge.frame_id&&String(bridge.bridge.frame_id)!==String(frameId||''))failures.push('FRAME_ID_MISMATCH');
     }
 
+    // Supervised P1 is a separate user-present test mode, NOT production/live.
+    // The exact approved one-tab session must have been installed by its verified CODE runner.
+    if(kind==='supervised'){
+      const a=root&&root.__POGI_V3_SUPERVISED_APPROVAL;
+      if(!a||a.userPresent!==true||a.singleTab!==true||a.noRecovery!==true||
+        a.character!==character||!/^[A-Za-z0-9_-]{12,80}$/.test(a.sessionId||'')||
+        !/^[a-f0-9]{40}$/.test(a.sourceCommit||'')||
+        !/^[a-f0-9]{40}$/.test(a.releaseCommit||'')||
+        !root.__POGI_V3_LOADER_STATUS||root.__POGI_V3_LOADER_STATUS.ok!==true||
+        root.__POGI_V3_LOADER_STATUS.installed!==true||
+        root.__POGI_V3_LOADER_STATUS.role!==character||
+        root.__POGI_V3_LOADER_STATUS.sourceCommit!==a.sourceCommit||
+        root.__POGI_V3_LOADER_STATUS.releaseCommit!==a.releaseCommit){
+        failures.push('V3_SUPERVISED_VERIFIED_SESSION_REQUIRED');
+      }
+    }
+
     if(kind==='live'&&manifest.production_selectable!==true)failures.push('V3_PRODUCTION_DISABLED');
     if(kind==='live'&&(!manifest.recovery_policy||manifest.recovery_policy.external_restore_ready!==true)){
       failures.push('V3_RECOVERY_CONTROL_PLANE_NOT_READY');
@@ -4853,7 +5522,7 @@ function createActivationGate({manifest,staleGuard}={}){
         failures.push('V3_RECOVERY_POST_PROMOTION_ALIGNMENT_NOT_READY');
       }
     }
-    if(!['development','shadow','live'].includes(kind))failures.push('ACTIVATION_MODE_INVALID');
+    if(!['development','shadow','live','supervised'].includes(kind))failures.push('ACTIVATION_MODE_INVALID');
 
     return{
       ok:failures.length===0,
@@ -15293,7 +15962,24 @@ module.exports={
 },{}]},cache=Object.create(null);
 function load(id){if(Object.prototype.hasOwnProperty.call(cache,id))return cache[id].exports;var d=defs[id];if(!d)throw Error("V3_UNBUNDLED_MODULE:"+id);var m={exports:{}};cache[id]=m;function req(n){if(!Object.prototype.hasOwnProperty.call(d[1],n))throw Error("V3_UNDECLARED_IMPORT:"+n);return load(d[1][n]);}d[0](req,m,m.exports);return m.exports;}
 root.__POGI_V3_DELIVERY=Object.freeze({installed:true,role:role,sourceCommit:commit,fullGraph:true,autoStarted:false,
+startupModulesStaged:true,
+verifyStartupContracts:function(){
+var mapping={"FirstState":"bootstrap/FirstState.js","SkeletonCentral":"bootstrap/SkeletonCentral.js","OneTabLaunchBoundary":"bootstrap/OneTabLaunchBoundary.js","BrowserRunnerAdapter":"bootstrap/BrowserRunnerAdapter.js","BrowserAttemptLedger":"bootstrap/BrowserAttemptLedger.js","BrowserPinnedObservation":"bootstrap/BrowserPinnedObservation.js","CodeReadyCm":"bootstrap/CodeReadyCm.js","P1StartupSession":"bootstrap/P1StartupSession.js","P1SupervisedRole":"bootstrap/P1SupervisedRole.js"};
+if(!Object.keys(mapping).length)return {ok:false,reason:"STARTUP_NOT_STAGED"};
+var output={};Object.keys(mapping).forEach(function(name){var m=load(mapping[name]);
+output[name]=name==="FirstState"?typeof m.createFirstState==="function":
+name==="SkeletonCentral"?typeof m.createSkeletonCentral==="function":
+name==="OneTabLaunchBoundary"?typeof m.createOneTabLaunchBoundary==="function":
+name==="BrowserRunnerAdapter"?typeof m.createBrowserRunnerAdapter==="function":
+name==="BrowserAttemptLedger"?typeof m.createBrowserAttemptLedger==="function":
+name==="BrowserPinnedObservation"?typeof m.createBrowserPinnedObservation==="function":
+name==="CodeReadyCm"?(typeof m.createCodeReadyInbox==="function"&&typeof m.createCodeReadyOutbox==="function"):
+name==="P1StartupSession"?typeof m.createP1StartupSession==="function":
+name==="P1SupervisedRole"?typeof m.createP1SupervisedRole==="function":false;});
+return {ok:Object.values(output).every(Boolean),modules:output,gameplayStarted:false};},
 verifyEntrypoint:function(){var entry=load("bootstrap/LiveBootstrap.js");return {ok:typeof entry.bootstrapCharacterFromAdventureLand==="function",role:role,sourceCommit:commit};},
-launch:function(){return Promise.resolve({ok:false,error:"V3_STARTUP_NOT_YET_APPROVED"});}
+launch:function(options){
+options=options||{};var l=root.__POGI_V3_LOADER_STATUS,a=options.approval;if(!l||l.ok!==true||l.installed!==true||!(/^[a-f0-9]{64}$/.test(l.sha256||""))||l.role!==role||l.sourceCommit!==commit||!(/^[a-f0-9]{40}$/.test(l.releaseCommit||"")))return Promise.resolve({ok:false,error:"V3_VERIFIED_LOADER_REQUIRED"});if(!a||a.userPresent!==true||a.singleTab!==true||a.noRecovery!==true||a.sourceCommit!==commit||a.releaseCommit!==l.releaseCommit||a.sessionId!==options.sessionId)return Promise.resolve({ok:false,error:"V3_APPROVED_SUPERVISED_SESSION_REQUIRED"});if(options.runApprovedSequence===true&&(!Number.isSafeInteger(a.expiresAt)||Date.now()>a.expiresAt||a.expiresAt-Date.now()>900000))return Promise.resolve({ok:false,error:"V3_SUPERVISED_APPROVAL_EXPIRED"});async function startRoleRuntime(){root.__POGI_V3_SUPERVISED_APPROVAL=Object.assign({},a,{character:role});var b=await load("bootstrap/LiveBootstrap.js").bootstrapCharacterFromAdventureLand({root:root,character:role,frameId:"p1_"+options.sessionId+"_"+role,activationMode:"supervised",requireCompleteRole:role!=="Rentaro"});if(!b||b.ok!==true||!b.runtime||!b.runtime.scheduler)return {ok:false,error:"V3_ROLE_BOOT_FAILED:"+String(b&&b.error||"UNKNOWN")};if(role==="Rentaro"&&b.roleBuild&&b.roleBuild.missing_optional.some(function(m){return m!=="Bank";})){await b.runtime.shutdown();return {ok:false,error:"V3_MERCHANT_NON_BANK_MODULE_MISSING"};}var ready=b.runtime.readiness();if(!ready.ok){await b.runtime.shutdown();return {ok:false,error:"V3_ROLE_RUNTIME_NOT_READY"};}b.runtime.scheduler.start();root.__POGI_V3_LOADER_STATUS=Object.assign({},root.__POGI_V3_LOADER_STATUS,{gameplayStarted:true,activationMode:"supervised"});return {ok:true,runtime:b.runtime};}try{if(role==="Rentaro"){var central=load("bootstrap/P1StartupSession.js").createP1StartupSession(Object.assign({},options,{root:root,sourceCommit:commit,releaseCommit:l.releaseCommit,onHandoff:async function(ticket){if(typeof root.send_cm!=="function")return {ok:false};var n=options.makeNonce();if(typeof n!=="string"||!(/^[A-Za-z0-9_-]{12,80}$/.test(n)))return {ok:false};for(var i=0;i<3;i++){var child=["Souji","Hibari","Harutora"][i];var m={kind:"ORDER66_V3_GAMEPLAY_GO",role:child,sourceCommit:commit,releaseCommit:l.releaseCommit,sessionId:options.sessionId,nonce:n,at:Date.now()};var delivered=await root.send_cm(child,m);if(!delivered||!Array.isArray(delivered.receivers)||delivered.receivers.indexOf(child)<0)return {ok:false};}if(!await ticket.awaitRuntimeReady())return {ok:false,error:"V3_CHILD_RUNTIME_ACK_MISSING"};return startRoleRuntime();}}));if(options.runApprovedSequence===true)return central.runApprovedSequence().then(function(s){return s.state==="FAILED_MANUAL_REVIEW"?{ok:false,error:s.reason}:{ok:true,role:role,controller:central};}).catch(function(e){return {ok:false,error:String(e&&e.message||e)};});return Promise.resolve({ok:true,role:role,controller:central});}var childController=load("bootstrap/P1SupervisedRole.js").createP1SupervisedRole(Object.assign({},options,{root:root,sourceCommit:commit,releaseCommit:l.releaseCommit,startRuntime:startRoleRuntime}));if(options.runApprovedSequence===true)return childController.sendReadyOnce().then(function(receipt){return receipt.confirmed?{ok:true,role:role,fighter:childController}:{ok:false,error:"V3_CHILD_CM_UNCONFIRMED"};}).catch(function(e){return {ok:false,error:String(e&&e.message||e)};});return Promise.resolve({ok:true,role:role,fighter:childController});}catch(error){return Promise.resolve({ok:false,error:String(error&&error.message||error)});}
+}
 });
 })(globalThis);

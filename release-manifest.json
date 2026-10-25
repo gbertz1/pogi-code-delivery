@@ -1,52 +1,50 @@
 {
   "schema": 1,
-  "kind": "ORDER66_V3_INERT_STAGING_RELEASE",
-  "release_date": "2026-10-24",
-  "source_commit": "3619b7cd5a5671d426eb53784e3cee02941849fa",
-  "source_v3_js_files_verified": 206,
+  "kind": "ORDER66_V3_SUPERVISED_STARTUP_APPROVED_CANDIDATE",
+  "release_date": "2026-10-25",
+  "source_commit": "0c92c5bccf46349d67d47d4bc90d0ee50ada300b",
+  "source_v3_js_files_verified": 228,
   "approved_for_public_distribution": true,
-  "published": true,
+  "published": false,
   "production_selectable": false,
   "gameplay_auto_start": false,
-  "first_state_startup_enabled": false,
+  "supervised_startup_opt_in": true,
   "recovery_enabled": false,
   "github_actions_used": false,
   "node_test_results": {
-    "delivery_passed": 13,
-    "delivery_total": 13,
-    "v3_passed": 489,
-    "v3_total": 489,
-    "version_isolation": "PASS",
-    "runtime_boundaries": "PASS"
+    "v3_passed": 547,
+    "v3_total": 547,
+    "delivery_passed": 14,
+    "delivery_total": 14
   },
   "bundles": {
     "Rentaro": {
       "file": "order66-v3-Rentaro.js",
-      "bytes": 529263,
-      "modules": 94,
-      "sha256": "fa87f8ef538fa91f6ade11d0489e9f5f67e0fb39a2509e3aec6a627cd7160e77",
-      "git_blob_sha1": "2f3c094bbbbb8246c766e07a0325edbe14b829f5"
-    },
-    "Hibari": {
-      "file": "order66-v3-Hibari.js",
-      "bytes": 529261,
-      "modules": 94,
-      "sha256": "e182f658879054044f1a0ba4ee77d4f539be279f860e032521a7e8b63cf1dab4",
-      "git_blob_sha1": "d4d396dc8b31b02292948d4566674e3720be9e12"
-    },
-    "Harutora": {
-      "file": "order66-v3-Harutora.js",
-      "bytes": 529265,
-      "modules": 94,
-      "sha256": "f774755afbf118e1ede2f03104228ae8b724bf00f2c9b5d8e0cd7e41e61386ba",
-      "git_blob_sha1": "e9a9963f4ed1da628a84996ab9660dfc0b1dcaae"
+      "bytes": 574515,
+      "modules": 103,
+      "sha256": "10ea654eb44c3f8b1196f5f74c14422c1b2e2fd9c51086cd9019e3d7a894213e",
+      "git_blob_sha1": "7d27156f4536f7c95488e644aa1164773cde937d"
     },
     "Souji": {
       "file": "order66-v3-Souji.js",
-      "bytes": 529259,
-      "modules": 94,
-      "sha256": "f758909ff44eb6835f8a1592cb769c2ea65b0ac140540bb36286a6d6a69bd831",
-      "git_blob_sha1": "60d1d0a6c6a1fdb4f36c0110f8816fb5b32e75b8"
+      "bytes": 574511,
+      "modules": 103,
+      "sha256": "7eb5ec864b4cdcd46c86ba502c683005b7eff977d8bab9bdf0499531adf40e1d",
+      "git_blob_sha1": "1f3cc88f6c93ffabbc1a40f4135a015694be4e10"
+    },
+    "Hibari": {
+      "file": "order66-v3-Hibari.js",
+      "bytes": 574513,
+      "modules": 103,
+      "sha256": "1b400a78a5c7408f3a7698cc086394d215905732a74f3440c7d407f770412f68",
+      "git_blob_sha1": "2f8ea694f865550b4cf7bf81de641fbbd2d1ec2e"
+    },
+    "Harutora": {
+      "file": "order66-v3-Harutora.js",
+      "bytes": 574517,
+      "modules": 103,
+      "sha256": "8dfc50742f044267dd1c2d5d7b51f795efa695c99cf410bcf9f41e07a2befbe8",
+      "git_blob_sha1": "8e661aff3d7cbc07ae411533fd8279c73df2d8b7"
     }
   }
 }
