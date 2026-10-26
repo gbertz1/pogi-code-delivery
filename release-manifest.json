@@ -1,50 +1,42 @@
 {
   "schema": 1,
-  "kind": "ORDER66_V3_SUPERVISED_STARTUP_APPROVED_CANDIDATE",
-  "release_date": "2026-10-25",
-  "source_commit": "0c92c5bccf46349d67d47d4bc90d0ee50ada300b",
-  "source_v3_js_files_verified": 228,
-  "approved_for_public_distribution": true,
+  "kind": "ORDER66_V3_P1_CORRECTED_104_MODULE_CANDIDATE",
+  "source_commit": "a0f160a40a84ce3e37b52e74d018150d9539ab17",
   "published": false,
   "production_selectable": false,
-  "gameplay_auto_start": false,
-  "supervised_startup_opt_in": true,
+  "requires_bridge": "Pogi Bridge 0.6.22 supervised admission (not installed)",
+  "requires_explicit_user_present_session": true,
+  "auto_start": false,
   "recovery_enabled": false,
-  "github_actions_used": false,
-  "node_test_results": {
-    "v3_passed": 547,
-    "v3_total": 547,
-    "delivery_passed": 14,
-    "delivery_total": 14
-  },
+  "previous_public_commit": "522ce98da8c1492259252245c6300d4c0aef38b9",
   "bundles": {
     "Rentaro": {
       "file": "order66-v3-Rentaro.js",
-      "bytes": 574515,
-      "modules": 103,
-      "sha256": "10ea654eb44c3f8b1196f5f74c14422c1b2e2fd9c51086cd9019e3d7a894213e",
-      "git_blob_sha1": "7d27156f4536f7c95488e644aa1164773cde937d"
+      "bytes": 578961,
+      "modules": 104,
+      "sha256": "822510a53e54cc7f67632ce0046ec793ed7cf5f2fb2b104a90762ec1395e3882",
+      "git_blob_sha1": "a75a18992b98dfc74bde730eb11397ca28bd44bb"
     },
     "Souji": {
       "file": "order66-v3-Souji.js",
-      "bytes": 574511,
-      "modules": 103,
-      "sha256": "7eb5ec864b4cdcd46c86ba502c683005b7eff977d8bab9bdf0499531adf40e1d",
-      "git_blob_sha1": "1f3cc88f6c93ffabbc1a40f4135a015694be4e10"
+      "bytes": 578957,
+      "modules": 104,
+      "sha256": "575cb0530c8c6ccfe6592eb44865d4cdb16c2d0bfc13f2d80cab6bcc09fff0e0",
+      "git_blob_sha1": "c12b35c255df9e2e2c6754622c0bf77cbb6ff722"
     },
     "Hibari": {
       "file": "order66-v3-Hibari.js",
-      "bytes": 574513,
-      "modules": 103,
-      "sha256": "1b400a78a5c7408f3a7698cc086394d215905732a74f3440c7d407f770412f68",
-      "git_blob_sha1": "2f8ea694f865550b4cf7bf81de641fbbd2d1ec2e"
+      "bytes": 578959,
+      "modules": 104,
+      "sha256": "766944e176a9a2be3d04ed37c149335c40671ff4ac0747462fe5ae1b52ecfb5f",
+      "git_blob_sha1": "8d6a0d6332ecb405c372ae8b0aedc5b8c8e2288b"
     },
     "Harutora": {
       "file": "order66-v3-Harutora.js",
-      "bytes": 574517,
-      "modules": 103,
-      "sha256": "8dfc50742f044267dd1c2d5d7b51f795efa695c99cf410bcf9f41e07a2befbe8",
-      "git_blob_sha1": "8e661aff3d7cbc07ae411533fd8279c73df2d8b7"
+      "bytes": 578963,
+      "modules": 104,
+      "sha256": "63ba1050f66f64aac42c9fd0fb124ff9e684e0cf9721eeb83cd5353a42d7c6ff",
+      "git_blob_sha1": "f8e7cf2bd526f31563db6a68d9a536440aa7be12"
     }
   }
 }

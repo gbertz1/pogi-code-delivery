@@ -1,6 +1,6 @@
-/* ORDER66 V3 | Harutora | 0c92c5bccf46349d67d47d4bc90d0ee50ada300b | INERT FULL-GRAPH STAGING */
+/* ORDER66 V3 | Harutora | a0f160a40a84ce3e37b52e74d018150d9539ab17 | INERT FULL-GRAPH STAGING */
 (function(root){"use strict";
-var role="Harutora",commit="0c92c5bccf46349d67d47d4bc90d0ee50ada300b";
+var role="Harutora",commit="a0f160a40a84ce3e37b52e74d018150d9539ab17";
 if(!root.character||root.character.name!==role)throw Error("V3_WRONG_CHARACTER");
 if(root.__POGI_V3_DELIVERY)throw Error("V3_DELIVERY_ALREADY_INSTALLED");
 var defs={"adapters/adventureland/LiveAdapters.js":[function(require,module,exports){
@@ -2206,6 +2206,68 @@ function createOneTabLaunchBoundary({
 module.exports={FIGHTERS,createOneTabLaunchBoundary};
 
 },{"./SkeletonCentral":"bootstrap/SkeletonCentral.js"}],
+"bootstrap/P1BridgeGrant.js":[function(require,module,exports){
+'use strict';
+// Supervised V3-only child admission ticket. Rentaro prepares one per native dispatch.
+// The browser extension independently checks the ticket and saved CODE source
+// before Adventure Land is allowed to load a ?code= child frame.
+const ROLES=Object.freeze(['Souji','Hibari','Harutora']);
+const SHA40=/^[a-f0-9]{40}$/, SHA256=/^[a-f0-9]{64}$/, SESSION=/^[A-Za-z0-9_-]{12,80}$/;
+const PREFIX='POGI_V3_P1_CHILD_ADMISSION_V1_';
+function createV3ChildGrantIssuer({root,sourceCommit,releaseCommit,sessionId,
+  slotProofs,now=Date.now,makeNonce}={}){
+ if(!SHA40.test(sourceCommit||'')||!SHA40.test(releaseCommit||'')||!SESSION.test(sessionId||''))
+   throw Error('V3_ADMISSION_PINS_REQUIRED');
+ if(!root||typeof root!=='object'||!root.parent||!root.parent.sessionStorage||
+   typeof makeNonce!=='function')throw Error('V3_ADMISSION_BROWSER_ROOT_REQUIRED');
+ if(!slotProofs||ROLES.some(role=>{
+  const p=slotProofs[role];
+  return !p||!Number.isSafeInteger(p.number)||p.number<1||p.number>100||
+    typeof p.name!=='string'||!/^V3(?:Souji|Hibari|Harutora)$/.test(p.name)||
+    !SHA256.test(p.sha256||'');
+ }))throw Error('V3_ADMISSION_SAVED_SLOT_PINS_REQUIRED');
+ const owner=root.parent;
+ const fetchFn=root.fetch&&root.fetch.bind(root);
+ if(!fetchFn||!root.crypto||!root.crypto.subtle||!root.TextEncoder)
+   throw Error('V3_ADMISSION_HASH_APIS_REQUIRED');
+ async function issue({character,codeSlot}={}){
+  if(!ROLES.includes(character))throw Error('V3_ADMISSION_INVALID_ROLE');
+  const proof=slotProofs[character],store=owner.sessionStorage;
+  if(codeSlot!==proof.number)throw Error('V3_ADMISSION_WRONG_NUMERIC_SLOT');
+  if(!root.location||root.location.origin!=='https://adventure.land'||
+     !owner.location||owner.location.origin!=='https://adventure.land'||
+     !owner.character||owner.character.name!=='Rentaro'||owner.character.ctype!=='merchant'||
+     owner.inside!=='game'||!owner.socket||owner.socket.connected!==true||
+     root.character?.name!=='Rentaro'||root.__POGI_V3_P1_ACTIVE_OWNER!==sessionId)
+     throw Error('V3_ADMISSION_RENTARO_BROWSER_PROOF_MISSING');
+  const rows=owner.X&&owner.X.codes;
+  if(!rows||!Array.isArray(rows[String(proof.number)])||
+     rows[String(proof.number)][0]!==proof.name)throw Error('V3_ADMISSION_CODE_SLOT_NAME_MISMATCH');
+  const key=PREFIX+character;
+  if(store.getItem(key)!==null)throw Error('V3_ADMISSION_UNCONSUMED_GRANT_MANUAL_HOLD');
+  // Read the saved authenticated Adventure Land CODE endpoint, not local source strings.
+  const reply=await fetchFn('/code.js?name='+proof.number,{credentials:'same-origin',cache:'no-store'});
+  if(!reply||reply.ok!==true)throw Error('V3_ADMISSION_SAVED_CODE_FETCH_FAILED');
+  const source=await reply.text();
+  if(typeof source!=='string'||source.length<100)throw Error('V3_ADMISSION_EMPTY_SAVED_CODE');
+  const hashed=await root.crypto.subtle.digest('SHA-256',new root.TextEncoder().encode(source));
+  const digest=Array.from(new Uint8Array(hashed)).map(x=>x.toString(16).padStart(2,'0')).join('');
+  if(digest!==proof.sha256)throw Error('V3_ADMISSION_SAVED_CODE_SHA256_MISMATCH');
+  const timestamp=Number(now()),nonce=makeNonce();
+  if(!Number.isSafeInteger(timestamp)||!SESSION.test(nonce||''))throw Error('V3_ADMISSION_NONCE_OR_CLOCK_INVALID');
+  const ticket=JSON.stringify({schema:1,kind:'V3_SUPERVISED_CHILD_ONCE',
+   role:character,number:proof.number,name:proof.name,sha256:proof.sha256,
+   owner:'Rentaro',sourceCommit,releaseCommit,sessionId,nonce,
+   issuedAt:timestamp,expiresAt:timestamp+4000});
+  store.setItem(key,ticket);
+  if(store.getItem(key)!==ticket)throw Error('V3_ADMISSION_GRANT_NOT_PERSISTED');
+  return Object.freeze({ok:true,role:character,slot:proof.number,expiresAt:timestamp+4000});
+ }
+ return Object.freeze({issue,roles:ROLES});
+}
+module.exports={PREFIX,ROLES,createV3ChildGrantIssuer};
+
+},{}],
 "bootstrap/P1StartupSession.js":[function(require,module,exports){
 'use strict';
 // One Rentaro-owned, manually approved V3 startup session. No timers, retries, Recovery or browser management.
@@ -2214,10 +2276,11 @@ const {createBrowserAttemptLedger}=require('./BrowserAttemptLedger');
 const {createBrowserPinnedObservation}=require('./BrowserPinnedObservation');
 const {createOneTabLaunchBoundary}=require('./OneTabLaunchBoundary');
 const {createCodeReadyInbox}=require('./CodeReadyCm');
+const {createV3ChildGrantIssuer}=require('./P1BridgeGrant');
 const ROLES=Object.freeze(['Souji','Hibari','Harutora']);
 const GAMEPLAY_READY='ORDER66_V3_GAMEPLAY_READY';
 const SHA=/^[a-f0-9]{40}$/, ID=/^[A-Za-z0-9_-]{12,80}$/;
-function createP1StartupSession({root,sourceCommit,releaseCommit,sessionId,codeSlots,
+function createP1StartupSession({root,sourceCommit,releaseCommit,sessionId,codeSlots,slotProofs,
   makeNonce,now=Date.now,maxWaitMs=120000,enableNativeStart=false,
   approval,onHandoff=null,setIntervalFn=setInterval,clearIntervalFn=clearInterval,
   setTimeoutFn=setTimeout,clearTimeoutFn=clearTimeout,pollMs=2000}={}){
@@ -2231,6 +2294,10 @@ function createP1StartupSession({root,sourceCommit,releaseCommit,sessionId,codeS
  const env=adapter.environment();if(!env.ok)throw Error(env.reason);
  if(!root.localStorage)throw Error('P1_STORAGE_REQUIRED');
  if(!root.character||typeof root.character.on!=='function')throw Error('P1_CM_RECEIVER_REQUIRED');
+ // Each real V3 child requires a saved-slot hash check plus a one-use
+ // document_start Bridge ticket. Never dispatch an unadmitted child.
+ const grantIssuer=enableNativeStart===true?
+   createV3ChildGrantIssuer({root,sourceCommit,releaseCommit,sessionId,slotProofs,makeNonce,now}):null;
  // A CODE restart or a second Rentaro controller must not take ownership silently.
  if(root.__POGI_V3_P1_ACTIVE_OWNER)throw Error('P1_ANOTHER_OWNER_ACTIVE');
  const ownerKey='pogi:order66:v3:startup_owner:'+sessionId;
@@ -2242,10 +2309,14 @@ function createP1StartupSession({root,sourceCommit,releaseCommit,sessionId,codeS
  if(root.localStorage.getItem(ownerKey)!==ownerRecord)throw Error('P1_OWNER_FENCE_UNCONFIRMED');
  root.__POGI_V3_P1_ACTIVE_OWNER=sessionId;
  const ledger=createBrowserAttemptLedger({storage:root.localStorage,sessionId,makeNonce});
+
  const inbox=createCodeReadyInbox({sourceCommit,releaseCommit,sessionId,now});
  const observer=createBrowserPinnedObservation({sourceCommit,releaseCommit,sessionId,now});
  const boundary=createOneTabLaunchBoundary({sourceCommit,releaseCommit,mode:'BROWSER_SINGLE_TAB',
-   codeSlots,startChild:adapter.startChild,attemptLedger:ledger});
+   codeSlots,startChild:async request=>{
+     if(grantIssuer)await grantIssuer.issue(request);
+     return adapter.startChild(request);
+   },attemptLedger:ledger});
  const startedAt=Number(now());
  let state='PENDING',reason=null,failedAt=null,handoffAttempted=false,dispatchAt=null,lastRole=null;
  let interval=null,ticking=false,runtimeWait=null;
@@ -2316,7 +2387,7 @@ function createP1StartupSession({root,sourceCommit,releaseCommit,sessionId,codeS
     if(enableNativeStart!==true)return fail('P1_NATIVE_START_NOT_APPROVED');
     const response=await boundary.dispatchOnce({role:step.role,observations:obs,
       approval:{userPresent:true,role:step.role,sourceCommit,releaseCommit}});
-    if(!response.ok)return fail(response.reason);
+    if(!response.ok)return fail(response.reason+(response.error?':'+response.error:''));
     state='START_REQUESTED';lastRole=step.role;dispatchAt=Number(now());
     statusByRole[step.role]='START_REQUESTED';return status();
    }
@@ -2377,7 +2448,7 @@ function createP1StartupSession({root,sourceCommit,releaseCommit,sessionId,codeS
 }
 module.exports={createP1StartupSession};
 
-},{"./BrowserRunnerAdapter":"bootstrap/BrowserRunnerAdapter.js","./BrowserAttemptLedger":"bootstrap/BrowserAttemptLedger.js","./BrowserPinnedObservation":"bootstrap/BrowserPinnedObservation.js","./OneTabLaunchBoundary":"bootstrap/OneTabLaunchBoundary.js","./CodeReadyCm":"bootstrap/CodeReadyCm.js"}],
+},{"./BrowserRunnerAdapter":"bootstrap/BrowserRunnerAdapter.js","./BrowserAttemptLedger":"bootstrap/BrowserAttemptLedger.js","./BrowserPinnedObservation":"bootstrap/BrowserPinnedObservation.js","./OneTabLaunchBoundary":"bootstrap/OneTabLaunchBoundary.js","./CodeReadyCm":"bootstrap/CodeReadyCm.js","./P1BridgeGrant":"bootstrap/P1BridgeGrant.js"}],
 "bootstrap/P1SupervisedRole.js":[function(require,module,exports){
 'use strict';
 // Fighter counterpart for the one approved Rentaro startup. No runtime before verified GO.
