@@ -1,42 +1,51 @@
 {
   "schema": 1,
-  "kind": "ORDER66_V3_P1_CORRECTED_104_MODULE_CANDIDATE",
-  "source_commit": "a0f160a40a84ce3e37b52e74d018150d9539ab17",
-  "published": false,
-  "production_selectable": false,
-  "requires_bridge": "Pogi Bridge 0.6.22 supervised admission (not installed)",
-  "requires_explicit_user_present_session": true,
+  "kind": "ORDER66_V3_P1_SMART_MOVE_CORRECTED_CANDIDATE",
+  "source_commit": "597375c1ece8f4b1fcbefe9b95b168097dcd59ca",
+  "delivery_branch": "order66/v3-smartmove-candidate-20261027",
+  "approved": false,
+  "published_to_main": false,
   "auto_start": false,
-  "recovery_enabled": false,
-  "previous_public_commit": "522ce98da8c1492259252245c6300d4c0aef38b9",
+  "activated": false,
+  "requires_manual_cutover": true,
+  "requires_new_pinned_code_loaders": true,
+  "requires_bridge": "0.6.23",
+  "recovery": false,
   "bundles": {
     "Rentaro": {
       "file": "order66-v3-Rentaro.js",
-      "bytes": 578961,
-      "modules": 104,
-      "sha256": "822510a53e54cc7f67632ce0046ec793ed7cf5f2fb2b104a90762ec1395e3882",
-      "git_blob_sha1": "a75a18992b98dfc74bde730eb11397ca28bd44bb"
+      "sha256": "3fcf9f37659b414daff7cd9698815723b3f27faeb6701de9cc76de878ffd4710",
+      "bytes": 579404,
+      "modules": 104
     },
     "Souji": {
       "file": "order66-v3-Souji.js",
-      "bytes": 578957,
-      "modules": 104,
-      "sha256": "575cb0530c8c6ccfe6592eb44865d4cdb16c2d0bfc13f2d80cab6bcc09fff0e0",
-      "git_blob_sha1": "c12b35c255df9e2e2c6754622c0bf77cbb6ff722"
+      "sha256": "477cad1efc8b0db2715a555820853887e071cc9eed0709cc0a68ef5911260595",
+      "bytes": 579400,
+      "modules": 104
     },
     "Hibari": {
       "file": "order66-v3-Hibari.js",
-      "bytes": 578959,
-      "modules": 104,
-      "sha256": "766944e176a9a2be3d04ed37c149335c40671ff4ac0747462fe5ae1b52ecfb5f",
-      "git_blob_sha1": "8d6a0d6332ecb405c372ae8b0aedc5b8c8e2288b"
+      "sha256": "a03eb00ac66cc088a358cfd43641c7cb17300846a5b08ecc6c48b91a804c3d41",
+      "bytes": 579402,
+      "modules": 104
     },
     "Harutora": {
       "file": "order66-v3-Harutora.js",
-      "bytes": 578963,
-      "modules": 104,
-      "sha256": "63ba1050f66f64aac42c9fd0fb124ff9e684e0cf9721eeb83cd5353a42d7c6ff",
-      "git_blob_sha1": "f8e7cf2bd526f31563db6a68d9a536440aa7be12"
+      "sha256": "b3eae5ae30bb73d430b79bde3730967790368ba07a00095f3c9e3676d38da9e2",
+      "bytes": 579406,
+      "modules": 104
     }
-  }
+  },
+  "tests": {
+    "canonical": "553/553",
+    "adapter": "12/12",
+    "offline_four_role": true
+  },
+  "notes": [
+    "Candidate branch only. Do not engage these bundles directly.",
+    "Legacy pinned CODE slots still reference main@75f29a3724b09927c450efecbede756b64e1ef05.",
+    "GitHub blob SHA matched offline assembly per role.",
+    "No GitHub Actions, unattended deployment, or automatic retry."
+  ]
 }
