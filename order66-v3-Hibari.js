@@ -1,6 +1,6 @@
-/* ORDER66 V3 | Hibari | a0f160a40a84ce3e37b52e74d018150d9539ab17 | INERT FULL-GRAPH STAGING */
+/* ORDER66 V3 | Hibari | 597375c1ece8f4b1fcbefe9b95b168097dcd59ca | INERT FULL-GRAPH STAGING */
 (function(root){"use strict";
-var role="Hibari",commit="a0f160a40a84ce3e37b52e74d018150d9539ab17";
+var role="Hibari",commit="597375c1ece8f4b1fcbefe9b95b168097dcd59ca";
 if(!root.character||root.character.name!==role)throw Error("V3_WRONG_CHARACTER");
 if(root.__POGI_V3_DELIVERY)throw Error("V3_DELIVERY_ALREADY_INSTALLED");
 var defs={"adapters/adventureland/LiveAdapters.js":[function(require,module,exports){
@@ -58,7 +58,13 @@ function makeMovement(root){
     async smartMove(target,options={}){
       const smartMove=fn(root,'smart_move');
       if(!smartMove)return{ok:false,error:'SMART_MOVE_UNAVAILABLE'};
-      const result=await smartMove(clone(target),clone(options));
+      // Adventure Land's native signature is smart_move(destination, on_done).
+      // The second argument is a legacy callback, NOT our movement metadata.
+      // Sending an options object there makes the native runner invoke it as a
+      // function on completion/interruption: "on_done is not a function".
+      // Keep internal movement policy/options at the V3 service layer; do not
+      // forward them into the native runner's callback position.
+      const result=await smartMove(clone(target));
       return{ok:!(result&&result.failed===true),result:clone(result)};
     }
   };
