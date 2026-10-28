@@ -1,6 +1,6 @@
-/* ORDER66 V3 | Souji | 597375c1ece8f4b1fcbefe9b95b168097dcd59ca | INERT FULL-GRAPH STAGING */
+/* ORDER66 V3 | Souji | 025de7b5dfaa5ffa2e0e083ec67d7b4cb41a6d81 | INERT FULL-GRAPH STAGING */
 (function(root){"use strict";
-var role="Souji",commit="597375c1ece8f4b1fcbefe9b95b168097dcd59ca";
+var role="Souji",commit="025de7b5dfaa5ffa2e0e083ec67d7b4cb41a6d81";
 if(!root.character||root.character.name!==role)throw Error("V3_WRONG_CHARACTER");
 if(root.__POGI_V3_DELIVERY)throw Error("V3_DELIVERY_ALREADY_INSTALLED");
 var defs={"adapters/adventureland/LiveAdapters.js":[function(require,module,exports){
@@ -1647,7 +1647,7 @@ function createDefaultCatalog(){
       return{
         service,
         module:{
-          start:async()=>({ok:true,initialized:true}),
+          start:async()=>service.initialize(),
           pause:async()=>service.pause(),
           resume:async()=>({ok:true,initialized:true}),
           health:async()=>service.health(),
@@ -15853,6 +15853,15 @@ function createStandState({adapter,now=Date.now}={}){
   const state={version:3,state:'STAND',phase:'CLOSED',paused:false,opened_at:null,last_error:null};
 
   const snapshot=()=>clone(state);
+  // Startup observation is read-only. A merchant's stand may already be
+  // physically open when V3 attaches; assuming CLOSED until an explicit
+  // STAND action causes false STAND_STATE_MISMATCH alerts in BANK/IDLE.
+  async function initialize(){
+    const open=await adapter.isOpen();
+    state.phase=state.paused?'PAUSED':open?'OPEN':'CLOSED';
+    state.last_error=null;
+    return{ok:true,initialized:true,observedOpen:open,status:snapshot()};
+  }
   async function sync(){
     const open=await adapter.isOpen();
     state.phase=open?'OPEN':'CLOSED';
@@ -15890,7 +15899,7 @@ function createStandState({adapter,now=Date.now}={}){
     return{ok:true,status:snapshot()};
   }
 
-  return{start,pause,resume,stop,health,snapshot,restore,getStatus:snapshot};
+  return{initialize,start,pause,resume,stop,health,snapshot,restore,getStatus:snapshot};
 }
 
 module.exports={createStandState};
