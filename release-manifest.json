@@ -1,7 +1,7 @@
 {
   "schema": 1,
-  "kind": "ORDER66_V3_P1_SMART_MOVE_CORRECTED_CANDIDATE",
-  "source_commit": "597375c1ece8f4b1fcbefe9b95b168097dcd59ca",
+  "kind": "ORDER66_V3_P1_MOVEMENT_STAND_CORRECTED_CANDIDATE",
+  "source_commit": "025de7b5dfaa5ffa2e0e083ec67d7b4cb41a6d81",
   "delivery_branch": "order66/v3-smartmove-candidate-20261027",
   "approved": false,
   "published_to_main": false,
@@ -14,38 +14,41 @@
   "bundles": {
     "Rentaro": {
       "file": "order66-v3-Rentaro.js",
-      "sha256": "3fcf9f37659b414daff7cd9698815723b3f27faeb6701de9cc76de878ffd4710",
-      "bytes": 579404,
+      "sha256": "310816b18e619517cc0317e81fb03c2d1cf92981301bcab39d6dc27ebf7939bc",
+      "bytes": 579861,
       "modules": 104
     },
     "Souji": {
       "file": "order66-v3-Souji.js",
-      "sha256": "477cad1efc8b0db2715a555820853887e071cc9eed0709cc0a68ef5911260595",
-      "bytes": 579400,
+      "sha256": "aa6c081f7e3fd9ba12ea7d0bf3be7656c28d951fb85fbb6097712b99a1bdd9cc",
+      "bytes": 579857,
       "modules": 104
     },
     "Hibari": {
       "file": "order66-v3-Hibari.js",
-      "sha256": "a03eb00ac66cc088a358cfd43641c7cb17300846a5b08ecc6c48b91a804c3d41",
-      "bytes": 579402,
+      "sha256": "8e152bbe37d160ba84ef6d8ff06219b94e3cc84d6dce97f66f49e1f0e3ede10f",
+      "bytes": 579859,
       "modules": 104
     },
     "Harutora": {
       "file": "order66-v3-Harutora.js",
-      "sha256": "b3eae5ae30bb73d430b79bde3730967790368ba07a00095f3c9e3676d38da9e2",
-      "bytes": 579406,
+      "sha256": "20df21436c1fc8f0340b32087abf6efd1cb7b73f5ad2f35218b097106c981d80",
+      "bytes": 579863,
       "modules": 104
     }
   },
   "tests": {
-    "canonical": "553/553",
+    "canonical": "555/555",
     "adapter": "12/12",
-    "offline_four_role": true
+    "stand": "11/11",
+    "offline_four_role": true,
+    "source_blob_proof": "230 matched / 14 docs-history-placeholders excluded"
   },
   "notes": [
-    "Candidate branch only. Do not engage these bundles directly.",
-    "Legacy pinned CODE slots still reference main@75f29a3724b09927c450efecbede756b64e1ef05.",
-    "GitHub blob SHA matched offline assembly per role.",
-    "No GitHub Actions, unattended deployment, or automatic retry."
+    "Candidate GitHub branch only; public main and in-game CODE unchanged",
+    "Fix native smart_move(destination,on_done) argument contract and pre-existing Stand open-state initialization",
+    "All four full-graph 104-module roles tested inert and supervised in offline simulator",
+    "Do not click Engage, no automatic retry, no Recovery",
+    "New 40-char candidate commit and four new SHA-pinned CODE loaders required for any future manual cutover"
   ]
 }
