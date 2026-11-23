@@ -1,0 +1,2341 @@
+        "y": 988
+          },
+          {
+            "sourceIndex": 786,
+            "op": "move",
+            "map": "main",
+            "x": 1216,
+            "y": 960
+          },
+          {
+            "sourceIndex": 787,
+            "op": "move",
+            "map": "main",
+            "x": 1219.2,
+            "y": 928
+          },
+          {
+            "sourceIndex": 788,
+            "op": "move",
+            "map": "main",
+            "x": 1222.4,
+            "y": 896
+          },
+          {
+            "sourceIndex": 789,
+            "op": "move",
+            "map": "main",
+            "x": 1225.6,
+            "y": 864
+          },
+          {
+            "sourceIndex": 790,
+            "op": "move",
+            "map": "main",
+            "x": 1228.8,
+            "y": 832
+          },
+          {
+            "sourceIndex": 791,
+            "op": "move",
+            "map": "main",
+            "x": 1232,
+            "y": 800
+          },
+          {
+            "sourceIndex": 792,
+            "op": "move",
+            "map": "main",
+            "x": 1235.2,
+            "y": 768
+          },
+          {
+            "sourceIndex": 793,
+            "op": "move",
+            "map": "main",
+            "x": 1238.4,
+            "y": 736
+          },
+          {
+            "sourceIndex": 794,
+            "op": "move",
+            "map": "main",
+            "x": 1241.6,
+            "y": 704
+          },
+          {
+            "sourceIndex": 795,
+            "op": "move",
+            "map": "main",
+            "x": 1244.8,
+            "y": 672
+          },
+          {
+            "sourceIndex": 796,
+            "op": "move",
+            "map": "main",
+            "x": 1248,
+            "y": 640
+          },
+          {
+            "sourceIndex": 797,
+            "op": "move",
+            "map": "main",
+            "x": 1251.2,
+            "y": 608
+          },
+          {
+            "sourceIndex": 798,
+            "op": "move",
+            "map": "main",
+            "x": 1254.4,
+            "y": 576
+          },
+          {
+            "sourceIndex": 799,
+            "op": "move",
+            "map": "main",
+            "x": 1257.6,
+            "y": 544
+          },
+          {
+            "sourceIndex": 800,
+            "op": "move",
+            "map": "main",
+            "x": 1260.8,
+            "y": 512
+          },
+          {
+            "sourceIndex": 801,
+            "op": "move",
+            "map": "main",
+            "x": 1264,
+            "y": 480
+          },
+          {
+            "sourceIndex": 802,
+            "op": "move",
+            "map": "main",
+            "x": 1267.2,
+            "y": 448
+          },
+          {
+            "sourceIndex": 803,
+            "op": "move",
+            "map": "main",
+            "x": 1270.4,
+            "y": 416
+          },
+          {
+            "sourceIndex": 804,
+            "op": "move",
+            "map": "main",
+            "x": 1273.6,
+            "y": 384
+          },
+          {
+            "sourceIndex": 805,
+            "op": "move",
+            "map": "main",
+            "x": 1276.8,
+            "y": 352
+          },
+          {
+            "sourceIndex": 806,
+            "op": "move",
+            "map": "main",
+            "x": 1280,
+            "y": 320
+          },
+          {
+            "sourceIndex": 807,
+            "op": "move",
+            "map": "main",
+            "x": 1301.6,
+            "y": 298.4
+          },
+          {
+            "sourceIndex": 808,
+            "op": "move",
+            "map": "main",
+            "x": 1323.2,
+            "y": 276.8
+          },
+          {
+            "sourceIndex": 809,
+            "op": "move",
+            "map": "main",
+            "x": 1344.8,
+            "y": 255.2
+          },
+          {
+            "sourceIndex": 810,
+            "op": "move",
+            "map": "main",
+            "x": 1366.4,
+            "y": 233.6
+          },
+          {
+            "sourceIndex": 811,
+            "op": "move",
+            "map": "main",
+            "x": 1388,
+            "y": 212
+          },
+          {
+            "sourceIndex": 812,
+            "op": "move",
+            "map": "main",
+            "x": 1409.6,
+            "y": 190.4
+          },
+          {
+            "sourceIndex": 813,
+            "op": "move",
+            "map": "main",
+            "x": 1431.2,
+            "y": 168.8
+          },
+          {
+            "sourceIndex": 814,
+            "op": "move",
+            "map": "main",
+            "x": 1452.8,
+            "y": 147.2
+          },
+          {
+            "sourceIndex": 815,
+            "op": "move",
+            "map": "main",
+            "x": 1474.4,
+            "y": 125.6
+          },
+          {
+            "sourceIndex": 816,
+            "op": "move",
+            "map": "main",
+            "x": 1496,
+            "y": 104
+          },
+          {
+            "sourceIndex": 817,
+            "op": "move",
+            "map": "main",
+            "x": 1501.2,
+            "y": 72.6
+          },
+          {
+            "sourceIndex": 818,
+            "op": "move",
+            "map": "main",
+            "x": 1506.4,
+            "y": 41.2
+          },
+          {
+            "sourceIndex": 819,
+            "op": "move",
+            "map": "main",
+            "x": 1511.6,
+            "y": 9.8
+          },
+          {
+            "sourceIndex": 820,
+            "op": "move",
+            "map": "main",
+            "x": 1516.8,
+            "y": -21.6
+          },
+          {
+            "sourceIndex": 821,
+            "op": "move",
+            "map": "main",
+            "x": 1522,
+            "y": -53
+          },
+          {
+            "sourceIndex": 822,
+            "op": "move",
+            "map": "main",
+            "x": 1527.2,
+            "y": -84.4
+          },
+          {
+            "sourceIndex": 823,
+            "op": "move",
+            "map": "main",
+            "x": 1532.4,
+            "y": -115.8
+          },
+          {
+            "sourceIndex": 824,
+            "op": "move",
+            "map": "main",
+            "x": 1537.6,
+            "y": -147.2
+          },
+          {
+            "sourceIndex": 825,
+            "op": "move",
+            "map": "main",
+            "x": 1542.8,
+            "y": -178.6
+          },
+          {
+            "sourceIndex": 826,
+            "op": "move",
+            "map": "main",
+            "x": 1548,
+            "y": -210
+          },
+          {
+            "sourceIndex": 827,
+            "op": "move",
+            "map": "main",
+            "x": 1553.2,
+            "y": -241.4
+          },
+          {
+            "sourceIndex": 828,
+            "op": "move",
+            "map": "main",
+            "x": 1558.4,
+            "y": -272.8
+          },
+          {
+            "sourceIndex": 829,
+            "op": "move",
+            "map": "main",
+            "x": 1563.6,
+            "y": -304.2
+          },
+          {
+            "sourceIndex": 830,
+            "op": "move",
+            "map": "main",
+            "x": 1568.8,
+            "y": -335.6
+          },
+          {
+            "sourceIndex": 831,
+            "op": "move",
+            "map": "main",
+            "x": 1574,
+            "y": -367
+          },
+          {
+            "sourceIndex": 832,
+            "op": "move",
+            "map": "main",
+            "x": 1579.2,
+            "y": -398.4
+          },
+          {
+            "sourceIndex": 833,
+            "op": "move",
+            "map": "main",
+            "x": 1584.4,
+            "y": -429.8
+          },
+          {
+            "sourceIndex": 834,
+            "op": "move",
+            "map": "main",
+            "x": 1589.6,
+            "y": -461.2
+          },
+          {
+            "sourceIndex": 835,
+            "op": "move",
+            "map": "main",
+            "x": 1594.8,
+            "y": -492.6
+          },
+          {
+            "sourceIndex": 836,
+            "op": "move",
+            "map": "main",
+            "x": 1600,
+            "y": -524
+          },
+          {
+            "sourceIndex": 837,
+            "op": "transport",
+            "map": "main",
+            "to": "halloween",
+            "spawn": 4,
+            "kind": "door",
+            "sourcePoint": [
+              1600,
+              -524
+            ],
+            "arrival": [
+              1212,
+              101
+            ]
+          }
+        ]
+      }
+    ],
+    "halloween": [
+      {
+        "sourceIndices": [
+          838,
+          863
+        ],
+        "actions": [
+          {
+            "sourceIndex": 838,
+            "op": "town",
+            "map": "halloween"
+          },
+          {
+            "sourceIndex": 839,
+            "op": "move",
+            "map": "halloween",
+            "x": -0.66667,
+            "y": 30.66667
+          },
+          {
+            "sourceIndex": 840,
+            "op": "move",
+            "map": "halloween",
+            "x": -1.33333,
+            "y": 61.33333
+          },
+          {
+            "sourceIndex": 841,
+            "op": "move",
+            "map": "halloween",
+            "x": -2,
+            "y": 92
+          },
+          {
+            "sourceIndex": 842,
+            "op": "move",
+            "map": "halloween",
+            "x": -2.66667,
+            "y": 122.66667
+          },
+          {
+            "sourceIndex": 843,
+            "op": "move",
+            "map": "halloween",
+            "x": -3.33333,
+            "y": 153.33333
+          },
+          {
+            "sourceIndex": 844,
+            "op": "move",
+            "map": "halloween",
+            "x": -4,
+            "y": 184
+          },
+          {
+            "sourceIndex": 845,
+            "op": "move",
+            "map": "halloween",
+            "x": -4.66667,
+            "y": 214.66667
+          },
+          {
+            "sourceIndex": 846,
+            "op": "move",
+            "map": "halloween",
+            "x": -5.33333,
+            "y": 245.33333
+          },
+          {
+            "sourceIndex": 847,
+            "op": "move",
+            "map": "halloween",
+            "x": -6,
+            "y": 276
+          },
+          {
+            "sourceIndex": 848,
+            "op": "move",
+            "map": "halloween",
+            "x": -6.66667,
+            "y": 306.66667
+          },
+          {
+            "sourceIndex": 849,
+            "op": "move",
+            "map": "halloween",
+            "x": -7.33333,
+            "y": 337.33333
+          },
+          {
+            "sourceIndex": 850,
+            "op": "move",
+            "map": "halloween",
+            "x": -8,
+            "y": 368
+          },
+          {
+            "sourceIndex": 851,
+            "op": "move",
+            "map": "halloween",
+            "x": -25.45455,
+            "y": 395.63636
+          },
+          {
+            "sourceIndex": 852,
+            "op": "move",
+            "map": "halloween",
+            "x": -42.90909,
+            "y": 423.27273
+          },
+          {
+            "sourceIndex": 853,
+            "op": "move",
+            "map": "halloween",
+            "x": -60.36364,
+            "y": 450.90909
+          },
+          {
+            "sourceIndex": 854,
+            "op": "move",
+            "map": "halloween",
+            "x": -77.81818,
+            "y": 478.54545
+          },
+          {
+            "sourceIndex": 855,
+            "op": "move",
+            "map": "halloween",
+            "x": -95.27273,
+            "y": 506.18182
+          },
+          {
+            "sourceIndex": 856,
+            "op": "move",
+            "map": "halloween",
+            "x": -112.72727,
+            "y": 533.81818
+          },
+          {
+            "sourceIndex": 857,
+            "op": "move",
+            "map": "halloween",
+            "x": -130.18182,
+            "y": 561.45455
+          },
+          {
+            "sourceIndex": 858,
+            "op": "move",
+            "map": "halloween",
+            "x": -147.63636,
+            "y": 589.09091
+          },
+          {
+            "sourceIndex": 859,
+            "op": "move",
+            "map": "halloween",
+            "x": -165.09091,
+            "y": 616.72727
+          },
+          {
+            "sourceIndex": 860,
+            "op": "move",
+            "map": "halloween",
+            "x": -182.54545,
+            "y": 644.36364
+          },
+          {
+            "sourceIndex": 861,
+            "op": "move",
+            "map": "halloween",
+            "x": -200,
+            "y": 672
+          },
+          {
+            "sourceIndex": 862,
+            "op": "move",
+            "map": "halloween",
+            "x": -224,
+            "y": 680
+          },
+          {
+            "sourceIndex": 863,
+            "op": "move",
+            "map": "halloween",
+            "x": -253.55556,
+            "y": 680
+          }
+        ]
+      }
+    ],
+    "cave": [
+      {
+        "sourceIndices": [
+          127,
+          128
+        ],
+        "actions": [
+          {
+            "sourceIndex": 127,
+            "op": "town",
+            "map": "cave"
+          },
+          {
+            "sourceIndex": 128,
+            "op": "transport",
+            "map": "cave",
+            "to": "main",
+            "spawn": 4,
+            "kind": "door",
+            "sourcePoint": [
+              0,
+              0
+            ],
+            "arrival": [
+              160,
+              1381
+            ]
+          }
+        ]
+      }
+    ],
+    "desertland": [
+      {
+        "sourceIndices": [
+          699,
+          714
+        ],
+        "actions": [
+          {
+            "sourceIndex": 699,
+            "op": "town",
+            "map": "desertland"
+          },
+          {
+            "sourceIndex": 700,
+            "op": "move",
+            "map": "desertland",
+            "x": 12.8,
+            "y": -24
+          },
+          {
+            "sourceIndex": 701,
+            "op": "move",
+            "map": "desertland",
+            "x": 25.6,
+            "y": -48
+          },
+          {
+            "sourceIndex": 702,
+            "op": "move",
+            "map": "desertland",
+            "x": 38.4,
+            "y": -72
+          },
+          {
+            "sourceIndex": 703,
+            "op": "move",
+            "map": "desertland",
+            "x": 51.2,
+            "y": -96
+          },
+          {
+            "sourceIndex": 704,
+            "op": "move",
+            "map": "desertland",
+            "x": 64,
+            "y": -120
+          },
+          {
+            "sourceIndex": 705,
+            "op": "move",
+            "map": "desertland",
+            "x": 62.4,
+            "y": -152
+          },
+          {
+            "sourceIndex": 706,
+            "op": "move",
+            "map": "desertland",
+            "x": 60.8,
+            "y": -184
+          },
+          {
+            "sourceIndex": 707,
+            "op": "move",
+            "map": "desertland",
+            "x": 59.2,
+            "y": -216
+          },
+          {
+            "sourceIndex": 708,
+            "op": "move",
+            "map": "desertland",
+            "x": 57.6,
+            "y": -248
+          },
+          {
+            "sourceIndex": 709,
+            "op": "move",
+            "map": "desertland",
+            "x": 56,
+            "y": -280
+          },
+          {
+            "sourceIndex": 710,
+            "op": "move",
+            "map": "desertland",
+            "x": 44.5,
+            "y": -306.5
+          },
+          {
+            "sourceIndex": 711,
+            "op": "move",
+            "map": "desertland",
+            "x": 33,
+            "y": -333
+          },
+          {
+            "sourceIndex": 712,
+            "op": "move",
+            "map": "desertland",
+            "x": 21.5,
+            "y": -359.5
+          },
+          {
+            "sourceIndex": 713,
+            "op": "move",
+            "map": "desertland",
+            "x": 10,
+            "y": -386
+          },
+          {
+            "sourceIndex": 714,
+            "op": "transport",
+            "map": "desertland",
+            "to": "main",
+            "spawn": 9,
+            "kind": "transporter_npc",
+            "sourcePoint": [
+              10,
+              -386
+            ],
+            "arrival": [
+              -85,
+              -389
+            ]
+          }
+        ]
+      }
+    ],
+    "winterland": [
+      {
+        "sourceIndices": [
+          649,
+          661
+        ],
+        "actions": [
+          {
+            "sourceIndex": 649,
+            "op": "town",
+            "map": "winterland"
+          },
+          {
+            "sourceIndex": 650,
+            "op": "move",
+            "map": "winterland",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "sourceIndex": 651,
+            "op": "move",
+            "map": "winterland",
+            "x": -2.75,
+            "y": -31.58
+          },
+          {
+            "sourceIndex": 652,
+            "op": "move",
+            "map": "winterland",
+            "x": -5.68,
+            "y": -65.35
+          },
+          {
+            "sourceIndex": 653,
+            "op": "move",
+            "map": "winterland",
+            "x": -8.76,
+            "y": -100.72
+          },
+          {
+            "sourceIndex": 654,
+            "op": "move",
+            "map": "winterland",
+            "x": -11.8,
+            "y": -135.69
+          },
+          {
+            "sourceIndex": 655,
+            "op": "move",
+            "map": "winterland",
+            "x": -14.88,
+            "y": -171.15
+          },
+          {
+            "sourceIndex": 656,
+            "op": "move",
+            "map": "winterland",
+            "x": -17.96,
+            "y": -206.52
+          },
+          {
+            "sourceIndex": 657,
+            "op": "move",
+            "map": "winterland",
+            "x": -21.01,
+            "y": -241.59
+          },
+          {
+            "sourceIndex": 658,
+            "op": "move",
+            "map": "winterland",
+            "x": -23.93,
+            "y": -275.16
+          },
+          {
+            "sourceIndex": 659,
+            "op": "move",
+            "map": "winterland",
+            "x": -26.99,
+            "y": -310.33
+          },
+          {
+            "sourceIndex": 660,
+            "op": "move",
+            "map": "winterland",
+            "x": -29.05,
+            "y": -334.04
+          },
+          {
+            "sourceIndex": 661,
+            "op": "transport",
+            "map": "winterland",
+            "to": "desertland",
+            "spawn": 1,
+            "kind": "transporter_npc",
+            "sourcePoint": [
+              -29.05,
+              -334.04
+            ],
+            "arrival": [
+              10,
+              -386
+            ]
+          }
+        ]
+      }
+    ],
+    "spookytown": [
+      {
+        "sourceIndices": [
+          515,
+          528
+        ],
+        "actions": [
+          {
+            "sourceIndex": 515,
+            "op": "town",
+            "map": "spookytown"
+          },
+          {
+            "sourceIndex": 516,
+            "op": "move",
+            "map": "spookytown",
+            "x": -4.09,
+            "y": -18.42
+          },
+          {
+            "sourceIndex": 517,
+            "op": "move",
+            "map": "spookytown",
+            "x": -12.21,
+            "y": -54.95
+          },
+          {
+            "sourceIndex": 518,
+            "op": "move",
+            "map": "spookytown",
+            "x": -20.37,
+            "y": -91.68
+          },
+          {
+            "sourceIndex": 519,
+            "op": "move",
+            "map": "spookytown",
+            "x": -18,
+            "y": -109.67
+          },
+          {
+            "sourceIndex": 520,
+            "op": "move",
+            "map": "spookytown",
+            "x": -26.32,
+            "y": -130.98
+          },
+          {
+            "sourceIndex": 521,
+            "op": "move",
+            "map": "spookytown",
+            "x": -6.39,
+            "y": -142.21
+          },
+          {
+            "sourceIndex": 522,
+            "op": "move",
+            "map": "spookytown",
+            "x": 4.33,
+            "y": -169.33
+          },
+          {
+            "sourceIndex": 523,
+            "op": "move",
+            "map": "spookytown",
+            "x": 12.67,
+            "y": -188.65
+          },
+          {
+            "sourceIndex": 524,
+            "op": "move",
+            "map": "spookytown",
+            "x": 31.85,
+            "y": -180
+          },
+          {
+            "sourceIndex": 525,
+            "op": "move",
+            "map": "spookytown",
+            "x": 69.17,
+            "y": -180
+          },
+          {
+            "sourceIndex": 526,
+            "op": "move",
+            "map": "spookytown",
+            "x": 106.48,
+            "y": -180
+          },
+          {
+            "sourceIndex": 527,
+            "op": "move",
+            "map": "spookytown",
+            "x": 142.2,
+            "y": -180
+          },
+          {
+            "sourceIndex": 528,
+            "op": "transport",
+            "map": "spookytown",
+            "to": "level2",
+            "spawn": 5,
+            "kind": "door",
+            "sourcePoint": [
+              142.2,
+              -180
+            ],
+            "arrival": [
+              75,
+              56
+            ]
+          }
+        ]
+      }
+    ],
+    "level2": [
+      {
+        "sourceIndices": [
+          342,
+          344
+        ],
+        "actions": [
+          {
+            "sourceIndex": 342,
+            "op": "move",
+            "map": "level2",
+            "x": 42.14,
+            "y": 56
+          },
+          {
+            "sourceIndex": 343,
+            "op": "move",
+            "map": "level2",
+            "x": 30,
+            "y": 41
+          },
+          {
+            "sourceIndex": 344,
+            "op": "transport",
+            "map": "level2",
+            "to": "level1",
+            "spawn": 4,
+            "kind": "door",
+            "sourcePoint": [
+              30,
+              41
+            ],
+            "arrival": [
+              -329.8,
+              491.38
+            ]
+          }
+        ]
+      },
+      {
+        "sourceIndices": [
+          529,
+          543
+        ],
+        "actions": [
+          {
+            "sourceIndex": 529,
+            "op": "move",
+            "map": "level2",
+            "x": 42.14,
+            "y": 56
+          },
+          {
+            "sourceIndex": 530,
+            "op": "move",
+            "map": "level2",
+            "x": 31,
+            "y": 25
+          },
+          {
+            "sourceIndex": 531,
+            "op": "move",
+            "map": "level2",
+            "x": 7.37,
+            "y": 1.37
+          },
+          {
+            "sourceIndex": 532,
+            "op": "move",
+            "map": "level2",
+            "x": -6.1,
+            "y": -5
+          },
+          {
+            "sourceIndex": 533,
+            "op": "move",
+            "map": "level2",
+            "x": -43.94,
+            "y": -5
+          },
+          {
+            "sourceIndex": 534,
+            "op": "move",
+            "map": "level2",
+            "x": -77.97,
+            "y": -8.97
+          },
+          {
+            "sourceIndex": 535,
+            "op": "move",
+            "map": "level2",
+            "x": -84.9,
+            "y": -30.17
+          },
+          {
+            "sourceIndex": 536,
+            "op": "move",
+            "map": "level2",
+            "x": -106.67,
+            "y": -25.3
+          },
+          {
+            "sourceIndex": 537,
+            "op": "move",
+            "map": "level2",
+            "x": -142.3,
+            "y": -35.99
+          },
+          {
+            "sourceIndex": 538,
+            "op": "move",
+            "map": "level2",
+            "x": -178.24,
+            "y": -46.77
+          },
+          {
+            "sourceIndex": 539,
+            "op": "move",
+            "map": "level2",
+            "x": -213.58,
+            "y": -57.37
+          },
+          {
+            "sourceIndex": 540,
+            "op": "move",
+            "map": "level2",
+            "x": -225.52,
+            "y": -75.75
+          },
+          {
+            "sourceIndex": 541,
+            "op": "move",
+            "map": "level2",
+            "x": -244.62,
+            "y": -65
+          },
+          {
+            "sourceIndex": 542,
+            "op": "move",
+            "map": "level2",
+            "x": -269,
+            "y": -65
+          },
+          {
+            "sourceIndex": 543,
+            "op": "transport",
+            "map": "level2",
+            "to": "level2w",
+            "spawn": 0,
+            "kind": "door",
+            "sourcePoint": [
+              -269,
+              -65
+            ],
+            "arrival": [
+              -10.6,
+              1.4
+            ]
+          }
+        ]
+      },
+      {
+        "sourceIndices": [
+          287,
+          289
+        ],
+        "actions": [
+          {
+            "sourceIndex": 287,
+            "op": "move",
+            "map": "level2",
+            "x": 3.77,
+            "y": -2.23
+          },
+          {
+            "sourceIndex": 288,
+            "op": "move",
+            "map": "level2",
+            "x": 30.23,
+            "y": 24.23
+          },
+          {
+            "sourceIndex": 289,
+            "op": "transport",
+            "map": "level2",
+            "to": "spookytown",
+            "spawn": 2,
+            "kind": "door",
+            "sourcePoint": [
+              30.23,
+              24.23
+            ],
+            "arrival": [
+              192,
+              -194
+            ]
+          }
+        ]
+      }
+    ],
+    "level1": [
+      {
+        "sourceIndices": [
+          345,
+          364
+        ],
+        "actions": [
+          {
+            "sourceIndex": 345,
+            "op": "move",
+            "map": "level1",
+            "x": -335.14,
+            "y": 454.02
+          },
+          {
+            "sourceIndex": 346,
+            "op": "move",
+            "map": "level1",
+            "x": -340.45,
+            "y": 416.87
+          },
+          {
+            "sourceIndex": 347,
+            "op": "move",
+            "map": "level1",
+            "x": -345.74,
+            "y": 379.83
+          },
+          {
+            "sourceIndex": 348,
+            "op": "move",
+            "map": "level1",
+            "x": -351.03,
+            "y": 342.79
+          },
+          {
+            "sourceIndex": 349,
+            "op": "move",
+            "map": "level1",
+            "x": -356.07,
+            "y": 307.53
+          },
+          {
+            "sourceIndex": 350,
+            "op": "move",
+            "map": "level1",
+            "x": -362.13,
+            "y": 277.06
+          },
+          {
+            "sourceIndex": 351,
+            "op": "move",
+            "map": "level1",
+            "x": -369.95,
+            "y": 240.57
+          },
+          {
+            "sourceIndex": 352,
+            "op": "move",
+            "map": "level1",
+            "x": -377.77,
+            "y": 204.09
+          },
+          {
+            "sourceIndex": 353,
+            "op": "move",
+            "map": "level1",
+            "x": -385.61,
+            "y": 167.5
+          },
+          {
+            "sourceIndex": 354,
+            "op": "move",
+            "map": "level1",
+            "x": -393.47,
+            "y": 130.81
+          },
+          {
+            "sourceIndex": 355,
+            "op": "move",
+            "map": "level1",
+            "x": -400.93,
+            "y": 95.99
+          },
+          {
+            "sourceIndex": 356,
+            "op": "move",
+            "map": "level1",
+            "x": -403.31,
+            "y": 64.85
+          },
+          {
+            "sourceIndex": 357,
+            "op": "move",
+            "map": "level1",
+            "x": -405.17,
+            "y": 27.59
+          },
+          {
+            "sourceIndex": 358,
+            "op": "move",
+            "map": "level1",
+            "x": -407.04,
+            "y": -9.89
+          },
+          {
+            "sourceIndex": 359,
+            "op": "move",
+            "map": "level1",
+            "x": -408.8,
+            "y": -44.93
+          },
+          {
+            "sourceIndex": 360,
+            "op": "move",
+            "map": "level1",
+            "x": -410.73,
+            "y": -83.68
+          },
+          {
+            "sourceIndex": 361,
+            "op": "move",
+            "map": "level1",
+            "x": -412.59,
+            "y": -120.84
+          },
+          {
+            "sourceIndex": 362,
+            "op": "move",
+            "map": "level1",
+            "x": -414.46,
+            "y": -158.21
+          },
+          {
+            "sourceIndex": 363,
+            "op": "move",
+            "map": "level1",
+            "x": -416.33,
+            "y": -195.58
+          },
+          {
+            "sourceIndex": 364,
+            "op": "transport",
+            "map": "level1",
+            "to": "halloween",
+            "spawn": 3,
+            "kind": "door",
+            "sourcePoint": [
+              -416.33,
+              -195.58
+            ],
+            "arrival": [
+              -1071,
+              -1485
+            ]
+          }
+        ]
+      },
+      {
+        "sourceIndices": [
+          256,
+          286
+        ],
+        "actions": [
+          {
+            "sourceIndex": 256,
+            "op": "move",
+            "map": "level1",
+            "x": 2,
+            "y": 13.56
+          },
+          {
+            "sourceIndex": 257,
+            "op": "move",
+            "map": "level1",
+            "x": 19.42,
+            "y": 53.38
+          },
+          {
+            "sourceIndex": 258,
+            "op": "move",
+            "map": "level1",
+            "x": 34.46,
+            "y": 87.76
+          },
+          {
+            "sourceIndex": 259,
+            "op": "move",
+            "map": "level1",
+            "x": 49.5,
+            "y": 122.14
+          },
+          {
+            "sourceIndex": 260,
+            "op": "move",
+            "map": "level1",
+            "x": 64.49,
+            "y": 156.42
+          },
+          {
+            "sourceIndex": 261,
+            "op": "move",
+            "map": "level1",
+            "x": 79.49,
+            "y": 190.7
+          },
+          {
+            "sourceIndex": 262,
+            "op": "move",
+            "map": "level1",
+            "x": 105,
+            "y": 222
+          },
+          {
+            "sourceIndex": 263,
+            "op": "move",
+            "map": "level1",
+            "x": 115,
+            "y": 255
+          },
+          {
+            "sourceIndex": 264,
+            "op": "move",
+            "map": "level1",
+            "x": 105,
+            "y": 291.93
+          },
+          {
+            "sourceIndex": 265,
+            "op": "move",
+            "map": "level1",
+            "x": 105,
+            "y": 328.71
+          },
+          {
+            "sourceIndex": 266,
+            "op": "move",
+            "map": "level1",
+            "x": 105,
+            "y": 366.98
+          },
+          {
+            "sourceIndex": 267,
+            "op": "move",
+            "map": "level1",
+            "x": 97.78,
+            "y": 400.86
+          },
+          {
+            "sourceIndex": 268,
+            "op": "move",
+            "map": "level1",
+            "x": 68,
+            "y": 429
+          },
+          {
+            "sourceIndex": 269,
+            "op": "move",
+            "map": "level1",
+            "x": 59,
+            "y": 463
+          },
+          {
+            "sourceIndex": 270,
+            "op": "move",
+            "map": "level1",
+            "x": 60,
+            "y": 499.81
+          },
+          {
+            "sourceIndex": 271,
+            "op": "move",
+            "map": "level1",
+            "x": 60,
+            "y": 537.34
+          },
+          {
+            "sourceIndex": 272,
+            "op": "move",
+            "map": "level1",
+            "x": 55.83,
+            "y": 572.34
+          },
+          {
+            "sourceIndex": 273,
+            "op": "move",
+            "map": "level1",
+            "x": 47,
+            "y": 612
+          },
+          {
+            "sourceIndex": 274,
+            "op": "move",
+            "map": "level1",
+            "x": 24,
+            "y": 634
+          },
+          {
+            "sourceIndex": 275,
+            "op": "move",
+            "map": "level1",
+            "x": -317,
+            "y": 636
+          },
+          {
+            "sourceIndex": 276,
+            "op": "move",
+            "map": "level1",
+            "x": -340,
+            "y": 636
+          },
+          {
+            "sourceIndex": 277,
+            "op": "move",
+            "map": "level1",
+            "x": -367,
+            "y": 627
+          },
+          {
+            "sourceIndex": 278,
+            "op": "move",
+            "map": "level1",
+            "x": -386,
+            "y": 612
+          },
+          {
+            "sourceIndex": 279,
+            "op": "move",
+            "map": "level1",
+            "x": -394.88,
+            "y": 584.98
+          },
+          {
+            "sourceIndex": 280,
+            "op": "move",
+            "map": "level1",
+            "x": -399.3,
+            "y": 549.64
+          },
+          {
+            "sourceIndex": 281,
+            "op": "move",
+            "map": "level1",
+            "x": -403.92,
+            "y": 512.61
+          },
+          {
+            "sourceIndex": 282,
+            "op": "move",
+            "map": "level1",
+            "x": -410,
+            "y": 472
+          },
+          {
+            "sourceIndex": 283,
+            "op": "move",
+            "map": "level1",
+            "x": -384,
+            "y": 459
+          },
+          {
+            "sourceIndex": 284,
+            "op": "move",
+            "map": "level1",
+            "x": -343,
+            "y": 469
+          },
+          {
+            "sourceIndex": 285,
+            "op": "move",
+            "map": "level1",
+            "x": -313,
+            "y": 533
+          },
+          {
+            "sourceIndex": 286,
+            "op": "transport",
+            "map": "level1",
+            "to": "level2",
+            "spawn": 1,
+            "kind": "door",
+            "sourcePoint": [
+              -313,
+              533
+            ],
+            "arrival": [
+              3.77,
+              -2.23
+            ]
+          }
+        ]
+      }
+    ],
+    "level2w": [
+      {
+        "sourceIndices": [
+          544,
+          549
+        ],
+        "actions": [
+          {
+            "sourceIndex": 544,
+            "op": "move",
+            "map": "level2w",
+            "x": -20.22,
+            "y": -5.49
+          },
+          {
+            "sourceIndex": 545,
+            "op": "move",
+            "map": "level2w",
+            "x": -54.76,
+            "y": -19.31
+          },
+          {
+            "sourceIndex": 546,
+            "op": "move",
+            "map": "level2w",
+            "x": -70.06,
+            "y": -48.66
+          },
+          {
+            "sourceIndex": 547,
+            "op": "move",
+            "map": "level2w",
+            "x": -84,
+            "y": -83.5
+          },
+          {
+            "sourceIndex": 548,
+            "op": "move",
+            "map": "level2w",
+            "x": -89,
+            "y": -114.87
+          },
+          {
+            "sourceIndex": 549,
+            "op": "transport",
+            "map": "level2w",
+            "to": "level2n",
+            "spawn": 0,
+            "kind": "door",
+            "sourcePoint": [
+              -89,
+              -114.87
+            ],
+            "arrival": [
+              0.22,
+              -2.85
+            ]
+          }
+        ]
+      }
+    ],
+    "level2n": [
+      {
+        "sourceIndices": [
+          550,
+          569
+        ],
+        "actions": [
+          {
+            "sourceIndex": 550,
+            "op": "move",
+            "map": "level2n",
+            "x": 3.11,
+            "y": -40.37
+          },
+          {
+            "sourceIndex": 551,
+            "op": "move",
+            "map": "level2n",
+            "x": 5.85,
+            "y": -75.99
+          },
+          {
+            "sourceIndex": 552,
+            "op": "move",
+            "map": "level2n",
+            "x": 8.72,
+            "y": -113.3
+          },
+          {
+            "sourceIndex": 553,
+            "op": "move",
+            "map": "level2n",
+            "x": 11.62,
+            "y": -151.03
+          },
+          {
+            "sourceIndex": 554,
+            "op": "move",
+            "map": "level2n",
+            "x": 14.47,
+            "y": -188.12
+          },
+          {
+            "sourceIndex": 555,
+            "op": "move",
+            "map": "level2n",
+            "x": 4.86,
+            "y": -215.29
+          },
+          {
+            "sourceIndex": 556,
+            "op": "move",
+            "map": "level2n",
+            "x": -4.6,
+            "y": -252.6
+          },
+          {
+            "sourceIndex": 557,
+            "op": "move",
+            "map": "level2n",
+            "x": -10.82,
+            "y": -289.93
+          },
+          {
+            "sourceIndex": 558,
+            "op": "move",
+            "map": "level2n",
+            "x": -22.76,
+            "y": -320.17
+          },
+          {
+            "sourceIndex": 559,
+            "op": "move",
+            "map": "level2n",
+            "x": -52.48,
+            "y": -339.99
+          },
+          {
+            "sourceIndex": 560,
+            "op": "move",
+            "map": "level2n",
+            "x": -84.06,
+            "y": -361.04
+          },
+          {
+            "sourceIndex": 561,
+            "op": "move",
+            "map": "level2n",
+            "x": -105,
+            "y": -384.33
+          },
+          {
+            "sourceIndex": 562,
+            "op": "move",
+            "map": "level2n",
+            "x": -105,
+            "y": -420.58
+          },
+          {
+            "sourceIndex": 563,
+            "op": "move",
+            "map": "level2n",
+            "x": -105,
+            "y": -458.32
+          },
+          {
+            "sourceIndex": 564,
+            "op": "move",
+            "map": "level2n",
+            "x": -105,
+            "y": -496.05
+          },
+          {
+            "sourceIndex": 565,
+            "op": "move",
+            "map": "level2n",
+            "x": -105,
+            "y": -532.09
+          },
+          {
+            "sourceIndex": 566,
+            "op": "move",
+            "map": "level2n",
+            "x": -105,
+            "y": -569.72
+          },
+          {
+            "sourceIndex": 567,
+            "op": "move",
+            "map": "level2n",
+            "x": -105,
+            "y": -607.35
+          },
+          {
+            "sourceIndex": 568,
+            "op": "move",
+            "map": "level2n",
+            "x": -105,
+            "y": -630
+          },
+          {
+            "sourceIndex": 569,
+            "op": "transport",
+            "map": "level2n",
+            "to": "winterland",
+            "spawn": 4,
+            "kind": "door",
+            "sourcePoint": [
+              -105,
+              -630
+            ],
+            "arrival": [
+              -864,
+              -1614
+            ]
+          }
+        ]
+      }
+    ],
+    "arena": [
+      {
+        "sourceIndices": [
+          960,
+          993
+        ],
+        "actions": [
+          {
+            "sourceIndex": 960,
+            "op": "move",
+            "map": "arena",
+            "x": 380,
+            "y": -672
+          },
+          {
+            "sourceIndex": 961,
+            "op": "move",
+            "map": "arena",
+            "x": 345.26,
+            "y": -654.22
+          },
+          {
+            "sourceIndex": 962,
+            "op": "move",
+            "map": "arena",
+            "x": 312.81,
+            "y": -637.6
+          },
+          {
+            "sourceIndex": 963,
+            "op": "move",
+            "map": "arena",
+            "x": 278.74,
+            "y": -620.16
+          },
+          {
+            "sourceIndex": 964,
+            "op": "move",
+            "map": "arena",
+            "x": 246.19,
+            "y": -603.5
+          },
+          {
+            "sourceIndex": 965,
+            "op": "move",
+            "map": "arena",
+            "x": 213.07,
+            "y": -586.55
+          },
+          {
+            "sourceIndex": 966,
+            "op": "move",
+            "map": "arena",
+            "x": 180.52,
+            "y": -569.88
+          },
+          {
+            "sourceIndex": 967,
+            "op": "move",
+            "map": "arena",
+            "x": 146.36,
+            "y": -552.4
+          },
+          {
+            "sourceIndex": 968,
+            "op": "move",
+            "map": "arena",
+            "x": 113.06,
+            "y": -535.35
+          },
+          {
+            "sourceIndex": 969,
+            "op": "move",
+            "map": "arena",
+            "x": 81.54,
+            "y": -519.21
+          },
+          {
+            "sourceIndex": 970,
+            "op": "move",
+            "map": "arena",
+            "x": 48.04,
+            "y": -502.07
+          },
+          {
+            "sourceIndex": 971,
+            "op": "move",
+            "map": "arena",
+            "x": 14.64,
+            "y": -484.97
+          },
+          {
+            "sourceIndex": 972,
+            "op": "move",
+            "map": "arena",
+            "x": -18.38,
+            "y": -468.06
+          },
+          {
+            "sourceIndex": 973,
+            "op": "move",
+            "map": "arena",
+            "x": -51.03,
+            "y": -451.35
+          },
+          {
+            "sourceIndex": 974,
+            "op": "move",
+            "map": "arena",
+            "x": -85.18,
+            "y": -433.86
+          },
+          {
+            "sourceIndex": 975,
+            "op": "move",
+            "map": "arena",
+            "x": -116.89,
+            "y": -417.63
+          },
+          {
+            "sourceIndex": 976,
+            "op": "move",
+            "map": "arena",
+            "x": -133.4,
+            "y": -393.48
+          },
+          {
+            "sourceIndex": 977,
+            "op": "move",
+            "map": "arena",
+            "x": -133.4,
+            "y": -354.47
+          },
+          {
+            "sourceIndex": 978,
+            "op": "move",
+            "map": "arena",
+            "x": -133.4,
+            "y": -317.69
+          },
+          {
+            "sourceIndex": 979,
+            "op": "move",
+            "map": "arena",
+            "x": -133.4,
+            "y": -281.22
+          },
+          {
+            "sourceIndex": 980,
+            "op": "move",
+            "map": "arena",
+            "x": -133.4,
+            "y": -244.12
+          },
+          {
+            "sourceIndex": 981,
+            "op": "move",
+            "map": "arena",
+            "x": -133.4,
+            "y": -206.71
+          },
+          {
+            "sourceIndex": 982,
+            "op": "move",
+            "map": "arena",
+            "x": -111.91,
+            "y": -181.08
+          },
+          {
+            "sourceIndex": 983,
+            "op": "move",
+            "map": "arena",
+            "x": -83.45,
+            "y": -157.12
+          },
+          {
+            "sourceIndex": 984,
+            "op": "move",
+            "map": "arena",
+            "x": -54.75,
+            "y": -132.95
+          },
+          {
+            "sourceIndex": 985,
+            "op": "move",
+            "map": "arena",
+            "x": -26.45,
+            "y": -109.12
+          },
+          {
+            "sourceIndex": 986,
+            "op": "move",
+            "map": "arena",
+            "x": 2.01,
+            "y": -85.15
+          },
+          {
+            "sourceIndex": 987,
+            "op": "move",
+            "map": "arena",
+            "x": 30.79,
+            "y": -60.91
+          },
+          {
+            "sourceIndex": 988,
+            "op": "move",
+            "map": "arena",
+            "x": 59.41,
+            "y": -36.81
+          },
+          {
+            "sourceIndex": 989,
+            "op": "move",
+            "map": "arena",
+            "x": 87.14,
+            "y": -13.46
+          },
+          {
+            "sourceIndex": 990,
+            "op": "move",
+            "map": "arena",
+            "x": 116.01,
+            "y": 10.85
+          },
+          {
+            "sourceIndex": 991,
+            "op": "move",
+            "map": "arena",
+            "x": 145.03,
+            "y": 35.29
+          },
+          {
+            "sourceIndex": 992,
+            "op": "move",
+            "map": "arena",
+            "x": 151.6,
+            "y": 40.82
+          },
+          {
+            "sourceIndex": 993,
+            "op": "transport",
+            "map": "arena",
+            "to": "main",
+            "spawn": 6,
+            "kind": "door",
+            "sourcePoint": [
+              151.6,
+              40.82
+            ],
+            "arrival": [
+              232,
+              397
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "routeCoverageNote": "R12 direct-return route preferred where native can_move_to permits; R11 recorded entry from Main is fallback for Level1/Level2 start positions"
+}
+;
+},{}],
+"organs/bank/AccessoryOrganizer.js":[function(require,module,exports){
+'use strict';
+
+const {BANK_PACK_SIZE}=require('../../core/contracts/AdventureLandContract');
+const {BANK_LAYOUT,ACCESSORY_TYPES,classifyItem,accessoryType}=require('./BankLayoutPolicy');
+
+const TYPE_ORDER=Object.freeze([...ACCESSORY_TYPES,'other']);
+const clone=v=>v==null?v:JSON.parse(JSON.stringify(v));
+function typeRank(type){const i=TYPE_ORDER.indexOf(type);return i<0?TYPE_ORDER.length:i;}
+function stableItemKey(entry,options={}){
+  const item=entry.item||{};
+  const kind=accessoryType(item,options)||'other';
+  return[
+    String(typeRank(kind)).padStart(2,'0'),
+    kind,
+    String(item.name||''),
+    String(999-Number(item.level||0)).padStart(3,'0'),
+    String(item.p||''),
+    String(entry.pack||''),
+    String(entry.slot).padStart(3,'0')
+  ].join('|');
+}
+function positionsForPacks(packs,reserved=new Set()){
+  const out=[];
+  for(const pack of packs)for(let slot=0;slot<BANK_PACK_SIZE;slot++)if(!reserved.has(pack+':'+slot))out.push({pack,slot});
+  return out;
+}
+function createAccessoryOrganizer(options={}){
+  function plan(entries,{reservedPositions=[]}={}){
+    const reserved=reservedPositions instanceof Set?reservedPositions:new Set(Array.isArray(reservedPositions)?reservedPositions:[]);
+    const rows=Array.isArray(entries)?entries:[];
+    const selected=[];
+    for(const entry of rows){
+      if(!entry||!entry.item)continue;
+      const decision=classifyItem(entry.item,options);
+      if(decision.category!=='ACCESSORY_MAX'&&decision.category!=='ACCESSORIES')continue;
+      selected.push({...entry,decision});
+    }
+    const placements=[],blocked=[];
+    for(const category of ['ACCESSORY_MAX','ACCESSORIES']){
+      const categoryRows=selected.filter(x=>x.decision.category===category).sort((a,b)=>stableItemKey(a,options).localeCompare(stableItemKey(b,options)));
+      const positions=positionsForPacks(BANK_LAYOUT[category].packs,reserved);
+      for(let i=0;i<categoryRows.length;i++){
+        const entry=categoryRows[i],target=positions[i];
+        if(!target){blocked.push({entry:clone(entry),category,error:'ACCESSORY_CATEGORY_CAPACITY_EXHAUSTED'});continue;}
+        placements.push({entry:clone(entry),category,accessoryType:entry.decision.accessoryType||'other',target});
+      }
+    }
+    const moves=placements.filter(x=>String(x.entry.pack)!==x.target.pack||Number(x.entry.slot)!==x.target.slot);
+    return{ok:blocked.length===0,placements,moves,blocked,counts:{total:selected.length,high:selected.filter(x=>x.decision.category==='ACCESSORY_MAX').length,normal:selected.filter(x=>x.decision.category==='ACCESSORIES').length}};
+  }
+  return{plan};
+}
+module.exports={TYPE_ORDER,createAccessoryOrganizer};
+
+},{"../../core/contracts/AdventureLandContract":"core/contracts/AdventureLandContract.js","./BankLayoutPolicy":"organs/bank/BankLayoutPolicy.js"}],
+"organs/bank/BankDestinations.js":[function(require,module,exports){
+'use strict';
+
+const {bankPackFloor,bankPacksForFloor,validBankSlot}=require('../../core/contracts/AdventureLandContract');
+const {BANK_LAYOUT}=require('./BankLayoutPolicy');
+
+const row=(label,floor,packs,extra={})=>Object.freeze({label,floor,packs:Object.freeze([...packs]),...extra});
+const policyOnly=(label,extra={})=>Object.freeze({label,policyRequired:true,...extra});
+const DESTINATIONS=Object.freeze({
+  AUTO_POLICY:policyOnly('Auto · Bank V3 policy'),
+  MAIN:row('Main Bank','bank',bankPacksForFloor('bank')),
+  BASEMENT:row('Basement Bank','bank_b',bankPacksForFloor('bank_b')),
+  GENERAL:row('General · items0','bank',BANK_LAYOUT.GENERAL.packs),
+  CRAFTABLES:row('Craftables · items1','bank',BANK_LAYOUT.CRAFTABLES.packs),
+  OTHER:row('Other / fallback · items2','bank',BANK_LAYOUT.OTHER.packs),
+  EXCHANGE:row('Exchangeables · items4–7','bank',BANK_LAYOUT.EXCHANGEABLES.packs),
+  EXCHANGEABLES:row('Exchangeables · items4–7','bank',BANK_LAYOUT.EXCHANGEABLES.packs),
+  KEYS:row('Keys · Basement · items8','bank_b',BANK_LAYOUT.KEYS.packs,{maxStack:50}),
+  ACCESSORY_MAX:row('High / max accessories · items9–12','bank_b',BANK_LAYOUT.ACCESSORY_MAX.packs),
+  ACCESSORIES:row('Accessories · items13–15','bank_b',BANK_LAYOUT.ACCESSORIES.packs),
+  ARMOR:row('Armor · items16–19','bank_b',BANK_LAYOUT.ARMOR.packs),
+  WEAPONS:row('Weapons · items20–23','bank_b',BANK_LAYOUT.WEAPONS.packs),
+  EMERGENCY:row('Emergency overflow · Upper Bank · items45–47','bank_u',BANK_LAYOUT.EMERGENCY.packs,{emergency:true}),
+
+  // Compatibility aliases. They no longer own their old dedicated packs.
+  GABRIELLE:row('Legacy Gabrielle alias → General · items0','bank',BANK_LAYOUT.GENERAL.packs,{alias:'GENERAL'}),
+  MATERIALS:row('Materials alias → Craftables · items1','bank',BANK_LAYOUT.CRAFTABLES.packs,{alias:'CRAFTABLES'}),
+  POTIONS:row('Potions alias → General · items0','bank',BANK_LAYOUT.GENERAL.packs,{alias:'GENERAL'}),
+  MISC:row('Misc alias → Other / fallback · items2','bank',BANK_LAYOUT.OTHER.packs,{alias:'OTHER'}),
+  CHRISTIE:policyOnly('Legacy Christie lane retired · resolve by canonical item category',{deprecated:true}),
+  GEAR:policyOnly('Legacy completed-gear lane retired · resolve by canonical item category',{deprecated:true})
+});
+function destination(name){return DESTINATIONS[String(name||'').toUpperCase()]||null;}
+function openPackSet(openPacks){
+  if(openPacks==null)return null;
+  if(Array.isArray(openPacks))return new Set(openPacks.map(String));
+  if(typeof openPacks==='object')return new Set(Object.keys(openPacks).filter(k=>openPacks[k]));
+  return new Set();
+}
+function planStorage(name,{resolvedPack=null,policyResolved=false,currentMap=null,openPacks=null}={}){
+  const key=String(name||'').toUpperCase(); const d=destination(key);
+  if(!d)return{ok:false,error:'BANK_DESTINATION_UNKNOWN'};
+  const pack=resolvedPack==null?null:String(resolvedPack);
+  if(d.policyRequired&&(!pack||policyResolved!==true))return{ok:false,error:'BANK_POLICY_RESOLUTION_REQUIRED'};
+  if(pack&&!bankPackFloor(pack))return{ok:false,error:'BANK_PACK_INVALID'};
+  if(pack&&d.packs&&d.packs.length&&!d.packs.includes(pack))return{ok:false,error:'BANK_PACK_NOT_IN_DESTINATION',allowedPacks:[...d.packs]};
+  const floor=d.floor||(pack?bankPackFloor(pack):null);
+  if(!floor)return{ok:false,error:'BANK_FLOOR_UNRESOLVED'};
+  if(pack&&bankPackFloor(pack)!==floor)return{ok:false,error:'BANK_FLOOR_MISMATCH',expectedFloor:floor,actualFloor:bankPackFloor(pack)};
+  const selectedPack=pack||(d.packs&&d.packs.length===1?d.packs[0]:null);
+  const open=openPackSet(openPacks);
+  if(selectedPack&&open&&!open.has(selectedPack))return{ok:false,error:'BANK_PACK_NOT_OPEN',pack:selectedPack,floor};
+  return{
+    ok:true,destination:key,label:d.label,floor,
+    allowedPacks:d.packs?[...d.packs]:pack?[pack]:[],
+    pack:selectedPack,
+    needsTravel:currentMap==null?null:String(currentMap)!==floor,
+    deprecated:d.deprecated===true,
+    alias:d.alias||null
+  };
+}
+function validateResolvedDeposit(name,deposit={}){
+  const planned=planStorage(name,{
+    resolvedPack:deposit.pack,policyResolved:deposit.policyResolved===true,currentMap:deposit.map||null,openPacks:deposit.openPacks||null
+  });
+  if(!planned.ok)return planned;
+  if(deposit.verified!==true)return{ok:false,error:'BANK_DEPOSIT_NOT_VERIFIED'};
+  const slot=Number(deposit.slot);
+  if(!validBankSlot(slot))return{ok:false,error:'BANK_SLOT_INVALID'};
+  return{ok:true,destination:planned.destination,label:planned.label,pack:String(deposit.pack),slot,floor:planned.floor,verified:true,deprecated:planned.deprecated,alias:planned.alias};
+}
+module.exports={DESTINATIONS,destination,planStorage,validateResolvedDeposit};
+
+},{"../../core/contracts/AdventureLandContract":"core/contracts/AdventureLandContract.js","./BankLayoutPolicy":"organs/bank/BankLayoutPolicy.js"}],
+"organs/bank/BankHandoffOps.js":[function(require,module,exports){
+'use strict';
+
+const clone=v=>v==null?v:JSON.parse(JSON.stringify(v));
+
+function createBankHandoffOps({gearHandoff}={}){
+  if(
+    !gearHandoff||
+    typeof gearHandoff.executionReady!=='function'||
+    typeof gearHandoff.stageNextFromBank!=='function'||
+    typeof gearHandoff.status!=='function'||
+    typeof gearHandoff.returnToBank!=='function'||
+    typeof gearHandoff.reconcileAfterGearFailure!=='function'
+  ){
+    throw new Error('BANK_HANDOFF_GEAR_SERVICE_REQUIRED');
+  }
+
+  async function returnReady(active){
+    const returned=await gearHandoff.returnToBank(active.id);
+    if(!returned||returned.ok!==true){
+      return{ok:false,error:'BANK_GEAR_HANDOFF_RETURN_FAILED',detail:clone(returned)};
+    }
+    return{
+      ok:true,
+      returned:true,
+      complete:returned.complete===true,
+      reason:'GEAR_HANDOFF_RETURNED_TO_BANK',
+      workId:active.id,
+      phase:returned.session&&returned.session.phase||null,
+      session:clone(returned.session||null)
+    };
+  }
+
+  async function handoff(){
+    let active=gearHandoff.status();
+
+    if(active&&active.phase==='READY_FOR_BANK'){
+      return returnReady(active);
+    }
+
+    if(active&&active.phase==='NEEDS_RESCAN'){
+      const reconciled=await gearHandoff.reconcileAfterGearFailure(active.id);
+      if(!reconciled||reconciled.ok!==true){
+        return{ok:false,error:'BANK_GEAR_HANDOFF_RECONCILE_FAILED',detail:clone(reconciled)};
+      }
+      if(reconciled.complete===true){
+        return{
+          ok:true,
+          reconciled:true,
+          complete:true,
+          reason:'GEAR_HANDOFF_FAILURE_NO_SURVIVORS',
+          workId:active.id,
+          session:clone(reconciled.session||null)
+        };
+      }
+      active=gearHandoff.status();
+      if(active&&active.phase==='READY_FOR_BANK')return returnReady(active);
+      return{ok:false,error:'BANK_GEAR_HANDOFF_RECONCILE_STATE_INVALID',detail:clone(reconciled)};
+    }
+
+    if(active&&active.phase==='READY_FOR_GEAR'){
+      return{
+        ok:true,
+        staged:true,
+        waitingForGear:true,
+        reason:gearHandoff.executionReady()===true?'GEAR_HANDOFF_AWAITING_EXECUTOR_RUN':'GEAR_EXECUTOR_LOST_AFTER_STAGE',
+        workId:active.id,
+        phase:active.phase
+      };
+    }
+
+    if(active&&active.phase==='STAGING'&&gearHandoff.executionReady()!==true){
+      return{
+        ok:true,
+        skipped:true,
+        reason:'GEAR_EXECUTOR_LOST_DURING_STAGING',
+        workId:active.id,
+        phase:active.phase
+      };
+    }
+
+    if(gearHandoff.executionReady()!==true){
+      return{
+        ok:true,
+        skipped:true,
+        reason:'GEAR_EXECUTOR_NOT_READY',
+        handoff:clone(active)
+      };
+    }
+
+    const staged=await gearHandoff.stageNextFromBank();
+    if(!staged||staged.ok!==true){
+      return{
+        ok:false,
+        error:'BANK_GEAR_HANDOFF_STAGE_FAILED',
+        detail:clone(staged)
+      };
+    }
+
+    if(staged.no_work===true){
+      return{ok:true,skipped:true,reason:'NO_GEAR_HANDOFF_WORK',plan:clone(staged.plan||null)};
+    }
+
+    return{
+      ok:true,
+      staged:staged.ready===true,
+      reason:staged.ready===true?'GEAR_HANDOFF_STAGED':'GEAR_HANDOFF_NO_STAGE',
+      workId:staged.session&&staged.session.id||null,
+      phase:staged.session&&staged.session.phase||null,
+      job:clone(staged.job||null)
+    };
+  }
+
+  return{handoff};
+}
+
+module.exports={createBankHandoffOps};
+
+},{}],
+"organs/bank/BankLayoutPolicy.js":[function(require,module,exports){
+'use strict';
+
+const {BANK_PACK_SIZE,bankPackFloor}=require('../../core/contracts/AdventureLandContract');
+const {isApprovedExchangeId}=require('../../core/policy/ExchangeApprovalPolicy');
+const {isScrollId}=require('../exchange/ExchangePolicy');
+const RecipeIntelligence=require('../../ligaments/crafting/RecipeIntelligence');
+
+const packs=(start,end)=>Object.freeze(Array.from({length:end-start+1},(_,i)=>'items'+(start+i)));
+const BANK_LAYOUT=Object.freeze({
+  GENERAL:Object.freeze({label:'General',packs:packs(0,0)}),
+  CRAFTABLES:Object.freeze({label:'Craftables',packs:packs(1,1)}),
+  OTHER:Object.freeze({label:'Other / fail-closed fallback',packs:packs(2,2)}),
+  RETIRED_ACCESSORY:Object.freeze({label:'Retired accessory source pack',packs:packs(3,3),deposit:false,migrate:true}),
+  EXCHANGEABLES:Object.freeze({label:'Exchangeables',packs:packs(4,7)}),
+  KEYS:Object.freeze({label:'Keys',packs:packs(8,8),maxStack:50}),
+  ACCESSORY_MAX:Object.freeze({label:'High / max-level accessories',packs:packs(9,12)}),
+  ACCESSORIES:Object.freeze({label:'Accessories',packs:packs(13,15)}),
+  ARMOR:Object.freeze({label:'Armor',packs:packs(16,19)}),
+  WEAPONS:Object.freeze({label:'Weapons',packs:packs(20,23)}),
+  EMERGENCY:Object.freeze({label:'Emergency overflow',packs:packs(45,47),emergency:true})
+});
+
+const ACCESSORY_TYPES=Object.freeze(['ring','earring','belt','amulet','orb']);
+const ARMOR_TYPES=Object.freeze(['helmet','chest','pants','gloves','shoes','cape','shield','offhand','source','quiver','misc_offhand']);
+const ACCESSORY_MAX_LEVELS=Object.freeze({ring:5,earring:3,belt:3,amulet:3,orb:3});
+const KNOWN_KEY_NAMES=Object.freeze(['cryptkey','tombkey','frozenkey']);
+
+function metadataFor(item,metaResolver){
+  if(!item)return null;
+  if(item.meta&&typeof item.meta==='object')return item.meta;
+  if(typeof metaResolver==='function'){
+    const row=metaResolver(String(item.name||''),item);
+    if(row&&typeof row==='object')return row;
+  }
+  return null;
+}
+function normalizedType(meta){return String(meta&&meta.type||'').toLowerCase();}
+function accessoryType(item,{metaResolver}={}){
+  const meta=metadataFor(item,metaResolver),type=normalizedType(meta);
+  if(ACCESSORY_TYPES.includes(type))return type;
+  const explicit=String(item&&item.accessoryType||'').toLowerCase();
+  if(ACCESSORY_TYPES.includes(explicit))return explicit;
+  return null;
+}
+function isExchangeable(meta){return !!(meta&&(meta.exchangeable===true||meta.exchange===true||Number(meta.e)>0));}
+function isCraftable(item,meta){
+  const type=normalizedType(meta);
+  if(type==='material'||!!(meta&&(meta.craftable===true||meta.crafting===true||meta.recipe===true)))return true;
+  return !!(item&&item.name&&RecipeIntelligence.isIngredient(item.name));
+}
+function isKey(item,meta){
+  const type=normalizedType(meta);
+  if(type==='key')return true;
+  return KNOWN_KEY_NAMES.includes(String(item&&item.name||'').toLowerCase());
+}
+function maxAccessoryLevel(kind,{maxAccessoryLevels=ACCESSORY_MAX_LEVELS,maxAccessoryLevelResolver=null,item=null,meta=null}={}){
+  if(typeof maxAccessoryLevelResolver==='function'){
+    const value=Number(maxAccessoryLevelResolver(kind,item,meta));
+    if(Number.isFinite(value)&&value>=0)return value;
+  }
+  const value=Number(maxAccessoryLevels&&maxAccessoryLevels[kind]);
+  return Number.isFinite(value)&&value>=0?value:null;
+}
+function classifyItem(item,options={}){
+  if(!item||!item.name)return{category:'OTHER',reason:'ITEM_INVALID',meta:null,accessoryType:null};
