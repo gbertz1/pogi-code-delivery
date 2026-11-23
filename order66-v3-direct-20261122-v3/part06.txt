@@ -1,0 +1,1617 @@
+state.lastError,
+        recoveryAttempts:state.recoveryAttempts,maxRecoveryAttempts:state.maxRecoveryAttempts,
+        destination:clone(state.destination),checkpoint:state.currentCheckpoint
+      };
+    }
+    state.status='FAILED';
+    state.lastResult={
+      type:'FAILED',
+      reason:state.lastError,
+      detail:clone(detail),
+      attempt:state.recoveryAttempts,
+      maxAttempts:state.maxRecoveryAttempts,
+      destination:clone(state.destination),
+      checkpoint:state.currentCheckpoint,
+      at:Number(now())
+    };
+    touch();
+    return{
+      ok:true,status:state.status,retrying:false,reason:state.lastError,
+      recoveryAttempts:state.recoveryAttempts,maxRecoveryAttempts:state.maxRecoveryAttempts,
+      destination:clone(state.destination),checkpoint:state.currentCheckpoint
+    };
+  }
+
+  function pause(reason='PAUSED'){
+    if(!active())return{ok:false,error:'NO_ACTIVE_ROUTE'};
+    if(state.status==='PAUSED')return{ok:false,error:'ALREADY_PAUSED'};
+    state.status='PAUSED';
+    state.lastError=String(reason);
+    touch();
+    return{ok:true,status:state.status,reason:state.lastError,checkpoint:state.currentCheckpoint,shadowOnly:true};
+  }
+  function interrupt(reason='INTERRUPTED'){
+    if(!active())return{ok:false,error:'NO_ACTIVE_ROUTE'};
+    state.status='INTERRUPTED';
+    state.lastError=String(reason);
+    touch();
+    return{ok:true,status:state.status,reason:state.lastError,checkpoint:state.currentCheckpoint,shadowOnly:true};
+  }
+  function resume(){
+    if(!state.routeOwner||!['PAUSED','INTERRUPTED'].includes(state.status))return{ok:false,error:'ROUTE_NOT_PAUSED_OR_INTERRUPTED'};
+    if(state.runtimeRevision==null||!models.has(state.runtimeRevision))return{ok:false,error:'ROUTE_MODEL_UNAVAILABLE_FOR_RESUME',runtimeRevision:state.runtimeRevision};
+    state.status='PLANNING';
+    state.currentEdge=null;
+    state.lastResult={type:'RESUME',checkpoint:state.currentCheckpoint,destination:clone(state.destination),at:Number(now())};
+    touch();
+    return{ok:true,status:state.status,checkpoint:state.currentCheckpoint,runtimeRevision:state.runtimeRevision,shadowOnly:true};
+  }
+  function arrive(proof={}){
+    if(!active())return{ok:false,error:'NO_ACTIVE_ROUTE'};
+    state.status='ARRIVED';
+    state.currentEdge=null;
+    state.lastError=null;
+    state.lastResult={type:'ARRIVED',proof:clone(proof),at:Number(now())};
+    touch();
+    return{ok:true,status:state.status,proof:clone(proof),shadowOnly:true};
+  }
+
+  function fail(reason='FAILED',detail=null){
+    if(!active())return{ok:false,error:'NO_ACTIVE_ROUTE'};
+    state.status='FAILED';
+    state.currentEdge=null;
+    state.lastError=String(reason);
+    state.lastResult={type:'FAILED',detail:clone(detail),destination:clone(state.destination),checkpoint:state.currentCheckpoint,at:Number(now())};
+    touch();
+    return{ok:true,status:state.status,reason:state.lastError,shadowOnly:true};
+  }
+  function cancel(reason='CANCELLED'){
+    if(!state.routeOwner||TERMINAL_STATES.has(state.status))return{ok:false,error:'NO_ACTIVE_ROUTE'};
+    state.status='CANCELLED';
+    state.lastError=String(reason);
+    state.currentEdge=null;
+    state.lastResult={type:'CANCELLED',at:Number(now())};
+    touch();
+    return{ok:true,status:state.status,reason:state.lastError,shadowOnly:true};
+  }
+
+  function exportCheckpoint(){
+    if(!state.routeOwner)return{ok:false,error:'NO_ROUTE_TO_CHECKPOINT'};
+    return{ok:true,checkpoint:snapshot()};
+  }
+
+  function restore(checkpoint){
+    const next=clone(checkpoint);
+    if(!next||typeof next!=='object'||next.version!==3)return{ok:false,error:'ROUTE_CHECKPOINT_INVALID'};
+    if(next.shadowOnly!==true||next.characterRoutingConnected!==false)return{ok:false,error:'ROUTE_CHECKPOINT_MODE_INVALID'};
+    if(!next.routeOwner||next.destination==null)return{ok:false,error:'ROUTE_CHECKPOINT_INTENT_INVALID'};
+    if(!ACTIVE_STATES.has(next.status))return{ok:false,error:'ROUTE_CHECKPOINT_NOT_RESUMABLE'};
+    if(!Number.isInteger(Number(next.runtimeRevision))||!models.has(Number(next.runtimeRevision))){
+      return{ok:false,error:'ROUTE_MODEL_UNAVAILABLE_FOR_RESTORE',runtimeRevision:next.runtimeRevision};
+    }
+    if(!Number.isInteger(Number(next.recoveryAttempts))||Number(next.recoveryAttempts)<0)return{ok:false,error:'ROUTE_CHECKPOINT_RECOVERY_INVALID'};
+    const preserved={
+      ...next,
+      runtimeRevision:Number(next.runtimeRevision),
+      pendingRevision:next.pendingRevision==null?null:Number(next.pendingRevision),
+      recoveryAttempts:Number(next.recoveryAttempts),
+      maxRecoveryAttempts
+    };
+    Object.assign(state,preserved);
+    state.status='PLANNING';
+    state.currentEdge=null;
+    state.lastError='RESTORED_REPLAN_FROM_LIVE_POSITION';
+    state.lastResult={type:'RESTORED',destination:clone(state.destination),checkpoint:state.currentCheckpoint,at:Number(now())};
+    touch();
+    return{ok:true,status:state.status,destination:clone(state.destination),checkpoint:state.currentCheckpoint,recoveryAttempts:state.recoveryAttempts};
+  }
+
+  return{
+    observeModel,request,markEdgeStarted,markSafeCheckpoint,reportFailure,
+    pause,interrupt,resume,arrive,fail,cancel,exportCheckpoint,restore,getStatus:snapshot
+  };
+}
+module.exports={createRouteService,ACTIVE_STATES,TERMINAL_STATES};
+
+},{}],
+"ligaments/party/PartyCoordinationService.js":[function(require,module,exports){
+'use strict';
+
+function clone(v){return v==null?v:JSON.parse(JSON.stringify(v));}
+function distance(a,b){
+  const ax=Number(a&&a.x),ay=Number(a&&a.y),bx=Number(b&&b.x),by=Number(b&&b.y);
+  if(![ax,ay,bx,by].every(Number.isFinite))return Infinity;
+  return Math.hypot(ax-bx,ay-by);
+}
+
+function createPartyCoordinationService({now=Date.now,maxAgeMs=5000}={}){
+  const members=new Map();
+
+  function update(name,snapshot={}){
+    const key=String(name||'');
+    if(!key)return{ok:false,error:'PARTY_MEMBER_REQUIRED'};
+    const row={...clone(snapshot),name:key,updated_at:Number(now())};
+    members.set(key,row);
+    return{ok:true,member:clone(row)};
+  }
+
+  function get(name){return clone(members.get(String(name||''))||null);}
+
+  function ready(required,{anchor=null,maxDistance=Infinity,sameMap=true,sameInstance=true}={}){
+    const t=Number(now()),reasons=[],rows={};
+    const anchorRow=anchor?members.get(String(anchor)):null;
+    if(anchor){
+      const key=String(anchor);
+      if(!anchorRow)reasons.push(key+':MISSING');
+      else if(anchorRow.online!==true||anchorRow.dead===true||anchorRow.rip===true||
+        t-Number(anchorRow.updated_at||0)>Number(maxAgeMs))reasons.push(key+':NOT_READY');
+    }
+    for(const name of required||[]){
+      const row=members.get(String(name));
+      rows[name]=clone(row||null);
+      if(!row){reasons.push(name+':MISSING');continue;}
+      if(t-Number(row.updated_at||0)>Number(maxAgeMs))reasons.push(name+':STALE');
+      if(row.online!==true)reasons.push(name+':OFFLINE');
+      if(row.dead===true||row.rip===true)reasons.push(name+':DEAD');
+      if(anchorRow&&sameMap&&String(row.map||'')!==String(anchorRow.map||''))reasons.push(name+':WRONG_MAP');
+      if(anchorRow&&sameInstance&&String(row.instance||'')!==String(anchorRow.instance||''))reasons.push(name+':WRONG_INSTANCE');
+      if(anchorRow&&Number.isFinite(Number(maxDistance))&&distance(anchorRow,row)>Number(maxDistance))reasons.push(name+':TOO_FAR');
+    }
+    return{ok:reasons.length===0,reasons,members:rows};
+  }
+
+  function status(){
+    const t=Number(now());
+    return Array.from(members.values()).map(row=>({...clone(row),age_ms:t-Number(row.updated_at||0)}));
+  }
+
+  return{update,get,ready,status,distance};
+}
+
+module.exports={createPartyCoordinationService,distance};
+
+},{}],
+"ligaments/shop/ShopBankHandoff.js":[function(require,module,exports){
+'use strict';
+const clone=v=>v==null?v:JSON.parse(JSON.stringify(v));
+function createShopBankHandoff({shop,bankRetrieve}={}){
+  if(!shop||typeof shop.status!=='function')throw new Error('SHOP_BANK_SHOP_REQUIRED');
+  if(!bankRetrieve||typeof bankRetrieve.retrieveExact!=='function')throw new Error('SHOP_BANK_RETRIEVE_REQUIRED');
+  async function handoff(){
+    const status=shop.status(),requests=status&&status.plan&&status.plan.bankPull||[];
+    if(!requests.length)return{ok:true,skipped:true,reason:'NO_SHOP_BANK_PULL'};
+    const request=clone(requests[0]);
+    const out=await bankRetrieve.retrieveExact({pack:request.source.pack,slot:request.source.slot,allowStack:true});
+    if(!out||out.ok!==true)return{ok:false,error:'SHOP_BANK_PULL_FAILED',request,detail:clone(out)};
+    return{ok:true,staged:true,reason:'SHOP_BANK_PULL_STAGED',request,result:clone(out)};
+  }
+  return{handoff};
+}
+module.exports={createShopBankHandoff};
+
+},{}],
+"ligaments/shop/ShopConfig.js":[function(require,module,exports){
+'use strict';
+
+const SLICE_FLAVORS=Object.freeze([
+  'slice_strawberry','slice_citrus','slice_honey','slice_mint','slice_blueberry','slice_nightberry'
+]);
+
+const DEFAULT_SHOP_CONFIG=Object.freeze({
+  schema:1,
+  enabled:true,
+  sales:Object.freeze([]),
+  trade:Object.freeze({
+    enabled:true,
+    createOwnOffers:true,
+    acceptExternal:true,
+    offeredItem:'slice_blueberry',
+    flavors:SLICE_FLAVORS,
+    targetStart:20,
+    targetStep:10,
+    targetMax:null,
+    minReceivePerBlueberry:1,
+    maxOwnOffers:5,
+    useBank:true
+  })
+});
+
+function clone(v){return v==null?v:JSON.parse(JSON.stringify(v));}
+function int(v,fallback,min=0){const n=Math.floor(Number(v));return Number.isFinite(n)&&n>=min?n:fallback;}
+function finite(v,fallback){const n=Number(v);return Number.isFinite(n)?n:fallback;}
+function text(v,max=80){return String(v==null?'':v).trim().slice(0,max);}
+
+function normalizeSaleRule(row,index){
+  row=row&&typeof row==='object'?row:{};
+  const match=row.match&&typeof row.match==='object'?row.match:{};
+  const name=text(match.name||row.name,80);
+  return{
+    id:text(row.id,80)||('sale-'+index),
+    enabled:row.enabled!==false,
+    match:{
+      name:name||null,
+      level:match.level==null?null:int(match.level,0,0),
+      p:match.p==null?null:text(match.p,40),
+      shiny:match.shiny===true
+    },
+    keep:int(row.keep,0,0),
+    quantity:row.quantity==null?null:int(row.quantity,1,1),
+    price:Math.max(0,finite(row.price,0)),
+    useBank:row.useBank!==false
+  };
+}
+
+function normalizeShopConfig(input={}){
+  input=input&&typeof input==='object'?input:{};
+  const trade=input.trade&&typeof input.trade==='object'?input.trade:{};
+  const max=trade.targetMax==null||trade.targetMax===''?null:int(trade.targetMax,null,1);
+  const flavors=Array.isArray(trade.flavors)?trade.flavors.map(x=>text(x,80)).filter(x=>SLICE_FLAVORS.includes(x)):SLICE_FLAVORS.slice();
+  const unique=[...new Set(flavors)];
+  const targetStart=int(trade.targetStart,20,1);
+  const targetStep=int(trade.targetStep,10,1);
+  return{
+    schema:1,
+    enabled:input.enabled!==false,
+    sales:(Array.isArray(input.sales)?input.sales:[]).map(normalizeSaleRule).filter(x=>x.match.name||x.match.shiny),
+    trade:{
+      enabled:trade.enabled!==false,
+      createOwnOffers:trade.createOwnOffers!==false,
+      acceptExternal:trade.acceptExternal!==false,
+      offeredItem:SLICE_FLAVORS.includes(text(trade.offeredItem,80))?text(trade.offeredItem,80):'slice_blueberry',
+      flavors:unique.length?unique:SLICE_FLAVORS.slice(),
+      targetStart,
+      targetStep,
+      targetMax:max!=null?Math.max(targetStart,max):null,
+      minReceivePerBlueberry:Math.max(0.01,finite(trade.minReceivePerBlueberry,1)),
+      maxOwnOffers:int(trade.maxOwnOffers,5,1),
+      useBank:trade.useBank!==false
+    }
+  };
+}
+
+module.exports={SLICE_FLAVORS,DEFAULT_SHOP_CONFIG,normalizeShopConfig,normalizeSaleRule,clone};
+
+},{}],
+"ligaments/shop/ShopLimb.js":[function(require,module,exports){
+'use strict';
+
+const {normalizeShopConfig}=require('./ShopConfig');
+const {createTradeLimb,sourceBankEntries}=require('./trade/TradeLimb');
+const clone=v=>v==null?v:JSON.parse(JSON.stringify(v));
+function q(item){return Math.max(1,Math.floor(Number(item&&item.q||1)));}
+function match(item,rule){
+  if(!item||!rule||rule.enabled===false)return false;
+  const m=rule.match||{};
+  if(m.name&&item.name!==m.name)return false;
+  if(m.level!=null&&Number(item.level||0)!==Number(m.level))return false;
+  if(m.p!=null&&String(item.p||'')!==String(m.p))return false;
+  if(m.shiny===true&&String(item.p||'').toLowerCase()!=='shiny')return false;
+  return true;
+}
+function countMatches(inventory,bank,rule){
+  let n=0;for(const item of inventory||[])if(match(item,rule))n+=q(item);
+  for(const row of sourceBankEntries(bank))if(match(row.item,rule))n+=q(row.item);
+  return n;
+}
+
+function createShopLimb({tradeLimb=createTradeLimb()}={}){
+  let config=normalizeShopConfig({});
+  let lastPlan=null;
+
+  function setConfig(next){config=normalizeShopConfig(next);return clone(config);}
+  function getConfig(){return clone(config);}
+  function planSales(inventory,bank){
+    const saleIntents=[],bankPull=[];
+    for(const rule of config.sales){
+      if(!rule.enabled)continue;
+      const total=countMatches(inventory,bank,rule),available=Math.max(0,total-rule.keep);
+      if(!available)continue;
+      let remaining=rule.quantity==null?available:Math.min(available,rule.quantity);
+      for(let slot=0;slot<(inventory||[]).length&&remaining>0;slot++){
+        const item=inventory[slot];if(!match(item,rule))continue;
+        const amount=Math.min(q(item),remaining);
+        saleIntents.push({ruleId:rule.id,inventorySlot:slot,item:clone(item),quantity:amount,price:rule.price});
+        remaining-=amount;
+      }
+      if(remaining>0&&rule.useBank){
+        for(const row of sourceBankEntries(bank)){
+          if(remaining<=0)break;if(!match(row.item,rule))continue;
+          bankPull.push({kind:'SHOP_SALE',ruleId:rule.id,name:row.item.name,quantity:q(row.item),source:{pack:row.pack,slot:row.slot},reason:'SHOP_SALE_STAGING'});
+          remaining-=q(row.item);
+        }
+      }
+    }
+    return{saleIntents,bankPull};
+  }
+
+  function plan({inventory=[],bank=null,visibleMerchants=[],standSlots={}}={}){
+    const sales=planSales(inventory,bank);
+    const trade=tradeLimb.plan({config,inventory,bank,visibleMerchants,standSlots});
+    lastPlan={
+      ok:true,enabled:config.enabled,
+      sales:sales.saleIntents,
+      trade,
+      bankPull:[...sales.bankPull,...trade.bankPull],
+      needsBank:[...sales.bankPull,...trade.bankPull].length>0
+    };
+    return clone(lastPlan);
+  }
+
+  function routingHint(){
+    if(lastPlan&&lastPlan.needsBank)return{state:'BANK',reason:'SHOP_BANK_PULL_REQUIRED',count:lastPlan.bankPull.length};
+    return null;
+  }
+  function status(){return{ok:true,config:getConfig(),plan:clone(lastPlan),trade:tradeLimb.snapshot()};}
+  function snapshot(){return{version:1,config:getConfig(),trade:tradeLimb.snapshot()};}
+  function restore(saved){if(!saved||saved.version!==1)throw new Error('SHOP_SNAPSHOT_INVALID');setConfig(saved.config||{});tradeLimb.restore(saved.trade||{version:1,target:config.trade.targetStart});return status();}
+  return{setConfig,getConfig,plan,routingHint,status,snapshot,restore,match,countMatches};
+}
+
+module.exports={createShopLimb,match,countMatches};
+
+},{"./ShopConfig":"ligaments/shop/ShopConfig.js","./trade/TradeLimb":"ligaments/shop/trade/TradeLimb.js"}],
+"ligaments/shop/ShopService.js":[function(require,module,exports){
+'use strict';
+
+const clone=v=>v==null?v:JSON.parse(JSON.stringify(v));
+
+function createShopService({shop,inventory,adapter,bankSnapshot=null}={}){
+  if(!shop||typeof shop.plan!=='function'||typeof shop.setConfig!=='function')throw new Error('SHOP_LIMB_REQUIRED');
+  if(!inventory||typeof inventory.snapshot!=='function'||typeof inventory.reserve!=='function'||typeof inventory.release!=='function')throw new Error('SHOP_INVENTORY_REQUIRED');
+  if(!adapter||typeof adapter.standSlots!=='function'||typeof adapter.visibleMerchants!=='function')throw new Error('SHOP_ADAPTER_REQUIRED');
+  let last=null;
+  let bankCache=null;
+  let bankKnown=false;
+
+  async function refreshConfig(){
+    if(typeof adapter.readConfig!=='function')return{ok:true,skipped:true};
+    const row=await adapter.readConfig();
+    if(row&&row.ok===true&&row.config){shop.setConfig(row.config);return{ok:true,config:shop.getConfig()};}
+    return row||{ok:false,error:'SHOP_CONFIG_READ_FAILED'};
+  }
+  async function bank(){
+    try{
+      const next=typeof bankSnapshot==='function'?await bankSnapshot():bankSnapshot;
+      if(next&&typeof next==='object'){bankCache=clone(next);bankKnown=true;}
+    }catch(error){}
+    return clone(bankCache);
+  }
+  function needsBankKnowledge(){
+    const c=shop.getConfig();
+    return !!(c&&c.enabled&&((c.trade&&c.trade.enabled&&c.trade.useBank)||(c.sales||[]).some(x=>x&&x.enabled!==false&&x.useBank!==false)));
+  }
+  async function plan(){
+    const items=await inventory.snapshot();
+    const out=shop.plan({inventory:items,bank:await bank(),visibleMerchants:adapter.visibleMerchants(),standSlots:adapter.standSlots()});
+    last=clone(out);return out;
+  }
+  async function findSpendable(name,quantity){
+    const rows=await inventory.find(name);const need=Math.max(1,Number(quantity)||1);
+    return rows.find(x=>Number(x.item&&x.item.q||1)>=need)||null;
+  }
+  async function withReservation(row,owner,fn){
+    if(!row)return{ok:false,error:'SHOP_INVENTORY_ITEM_UNAVAILABLE'};
+    const held=await inventory.reserve(row.slot,owner,{expected:row.identity});
+    if(!held||held.ok!==true)return held||{ok:false,error:'SHOP_RESERVE_FAILED'};
+    try{return await fn(row.slot,row.item);}finally{inventory.release(row.slot,owner);}
+  }
+  async function execute({refresh=true}={}){
+    if(refresh)await refreshConfig();
+    const work=await plan();
+    const results={cancelled:[],external:[],offers:[],sales:[],bankPull:clone(work.bankPull)};
+
+    for(const offer of work.trade.cancelOffers||[]){
+      if(typeof adapter.removeListing!=='function'){results.cancelled.push({ok:false,error:'SHOP_UNLIST_UNAVAILABLE',offer});continue;}
+      results.cancelled.push(await adapter.removeListing(offer.slot));
+    }
+
+    for(const trade of work.trade.externalTrades||[]){
+      const row=await findSpendable(trade.give.name,trade.give.q);
+      const target=typeof adapter.visibleMerchant==='function'?adapter.visibleMerchant(trade.targetId):null;
+      if(!target){results.external.push({ok:false,error:'SHOP_TRADE_TARGET_NOT_VISIBLE',trade});continue;}
+      results.external.push(await withReservation(row,'SHOP_TRADE_SWAP',slot=>adapter.tradeSwap(target,trade.slot,slot)));
+    }
+
+    for(const offer of work.trade.ownOffers||[]){
+      const row=await findSpendable(offer.give.name,offer.give.q);
+      results.offers.push(await withReservation(row,'SHOP_TRADE_OFFER',slot=>adapter.tradeOffer(slot,offer.slot,offer.want,offer.quantity)));
+    }
+
+    const occupied=new Set(Object.keys(adapter.standSlots()||{}));
+    for(const offer of work.trade.ownOffers||[])occupied.add(offer.slot);
+    const free=[];for(let i=48;i>=1;i--){const s='trade'+i;if(!occupied.has(s))free.push(s);}
+    for(const sale of work.sales||[]){
+      const tradeSlot=free.shift();if(!tradeSlot){results.sales.push({ok:false,error:'SHOP_NO_FREE_TRADE_SLOT',sale});break;}
+      const item=await inventory.slot(sale.inventorySlot);
+      const row=item?{slot:sale.inventorySlot,item,identity:inventory.identity(item)}:null;
+      results.sales.push(await withReservation(row,'SHOP_SALE',slot=>adapter.listSale(slot,tradeSlot,sale.price,sale.quantity)));
+    }
+    last={...clone(work),execution:clone(results)};
+    return{ok:true,plan:clone(work),results};
+  }
+  function routingHint(){
+    const hint=shop.routingHint();if(hint)return hint;
+    if(!bankKnown&&needsBankKnowledge())return{state:'BANK',reason:'SHOP_BANK_SCAN_REQUIRED',count:0};
+    return null;
+  }
+  async function start(){await refreshConfig();try{await plan();}catch(error){}return{ok:true,bankKnown};}
+  async function health(){return{ok:true,bankKnown,needsBankKnowledge:needsBankKnowledge(),routingHint:routingHint(),last:clone(last)};}
+  function status(){return{ok:true,last:clone(last),shop:shop.status(),bankKnown,bankCache:clone(bankCache)};}
+  function snapshot(){return{version:1,shop:shop.snapshot(),bankKnown,bankCache:clone(bankCache),last:clone(last)};}
+  function restore(saved){
+    if(!saved||saved.version!==1)throw new Error('SHOP_SERVICE_SNAPSHOT_INVALID');
+    shop.restore(saved.shop);
+    bankKnown=saved.bankKnown===true;
+    bankCache=clone(saved.bankCache||null);
+    last=clone(saved.last||null);
+    return status();
+  }
+  return{start,health,refreshConfig,plan,execute,routingHint,status,snapshot,restore};
+}
+
+module.exports={createShopService};
+
+},{}],
+"ligaments/shop/trade/TradeLimb.js":[function(require,module,exports){
+'use strict';
+
+const {SLICE_FLAVORS,normalizeShopConfig}=require('../ShopConfig');
+const clone=v=>v==null?v:JSON.parse(JSON.stringify(v));
+
+function qty(item){return Math.max(1,Math.floor(Number(item&&item.q||1)));}
+function sourceBankEntries(snapshot){
+  const source=snapshot&&snapshot.packs&&typeof snapshot.packs==='object'?snapshot.packs:snapshot;
+  const out=[];
+  for(const [pack,rows] of Object.entries(source||{})){
+    if(!Array.isArray(rows))continue;
+    for(let slot=0;slot<rows.length;slot++)if(rows[slot])out.push({pack,slot,item:rows[slot]});
+  }
+  return out;
+}
+function tradeSlotRows(standSlots){
+  const out=[];
+  for(const [slot,listing] of Object.entries(standSlots&&typeof standSlots==='object'?standSlots:{})){
+    if(!/^trade\d+$/i.test(slot)||!listing)continue;
+    out.push({slot,listing});
+  }
+  return out;
+}
+function countFlavors(items=[],bankSnapshot=null,flavors=SLICE_FLAVORS,standSlots=null){
+  const counts=Object.fromEntries(flavors.map(x=>[x,0]));
+  for(const item of items||[])if(item&&Object.prototype.hasOwnProperty.call(counts,item.name))counts[item.name]+=qty(item);
+  for(const row of sourceBankEntries(bankSnapshot))if(row.item&&Object.prototype.hasOwnProperty.call(counts,row.item.name))counts[row.item.name]+=qty(row.item);
+  for(const row of tradeSlotRows(standSlots))if(row.listing&&Object.prototype.hasOwnProperty.call(counts,row.listing.name))counts[row.listing.name]+=qty(row.listing);
+  return counts;
+}
+function advanceTarget(current,counts,trade){
+  let target=Math.max(Number(current||0),Number(trade.targetStart||20));
+  const step=Math.max(1,Number(trade.targetStep||10));
+  const max=trade.targetMax==null?null:Number(trade.targetMax);
+  const all=()=>trade.flavors.every(name=>Number(counts[name]||0)>=target);
+  let guard=0;
+  while(all()&&guard++<10000){
+    if(max!=null&&target>=max)break;
+    const next=max==null?target+step:Math.min(max,target+step);
+    if(next===target)break;
+    target=next;
+  }
+  return target;
+}
+function inventoryQuantity(items,name){let n=0;for(const x of items||[])if(x&&x.name===name)n+=qty(x);return n;}
+function bankSources(snapshot,name){return sourceBankEntries(snapshot).filter(x=>x.item&&x.item.name===name).map(clone);}
+function freeTradeSlots(standSlots,max){
+  const out=[];const slots=standSlots&&typeof standSlots==='object'?standSlots:{};
+  for(let i=48;i>=1&&out.length<max;i--){const key='trade'+i;if(!slots[key])out.push(key);}
+  return out;
+}
+function listingRows(merchants){
+  const out=[];
+  for(const merchant of merchants||[]){
+    if(!merchant||!merchant.slots)continue;
+    for(const [slot,listing] of Object.entries(merchant.slots)){
+      if(!/^trade\d+$/i.test(slot)||!listing||!listing.want)continue;
+      out.push({merchant,slot,listing});
+    }
+  }
+  return out;
+}
+function existingOwnOffers(standSlots,offered,flavors){
+  return tradeSlotRows(standSlots).filter(row=>{
+    const l=row.listing,w=l&&l.want||{};
+    return l&&String(l.name||'')===String(offered||'')&&flavors.includes(String(w.name||''))&&String(w.name||'')!==String(offered||'');
+  }).map(row=>({
+    slot:row.slot,
+    give:{name:String(row.listing.name),q:qty(row.listing)},
+    want:{name:String(row.listing.want.name),q:qty(row.listing.want)},
+    rid:row.listing.rid||null
+  })).sort((a,b)=>String(a.slot).localeCompare(String(b.slot),undefined,{numeric:true}));
+}
+
+function createTradeLimb({initialTarget=null}={}){
+  let target=initialTarget==null?null:Number(initialTarget);
+
+  function plan({config,inventory=[],bank=null,visibleMerchants=[],standSlots={}}={}){
+    const shop=normalizeShopConfig(config),trade=shop.trade;
+    const counts=countFlavors(inventory,bank,trade.flavors,standSlots);
+    target=advanceTarget(target,counts,trade);
+    const offered=trade.offeredItem;
+    const surplus=Math.max(0,Number(counts[offered]||0)-target);
+    const deficits={};
+    for(const name of trade.flavors)deficits[name]=Math.max(0,target-Number(counts[name]||0));
+    deficits[offered]=0;
+
+    const remainingDeficits=clone(deficits);
+    const existing=existingOwnOffers(standSlots,offered,trade.flavors);
+    const keptOffers=[],cancelOffers=[];
+    let committed=0;
+    for(const offer of existing){
+      const wanted=offer.want.name,give=Math.max(1,Number(offer.give.q||1)),receive=Math.max(1,Number(offer.want.q||1));
+      const valid=shop.enabled&&trade.enabled&&trade.createOwnOffers&&
+        keptOffers.length<trade.maxOwnOffers&&
+        give<=Math.max(0,surplus-committed)&&
+        Number(remainingDeficits[wanted]||0)>0;
+      if(!valid){cancelOffers.push({...clone(offer),reason:'SHOP_OFFER_NO_LONGER_SAFE'});continue;}
+      keptOffers.push(clone(offer));
+      committed+=give;
+      remainingDeficits[wanted]=Math.max(0,Number(remainingDeficits[wanted]||0)-receive);
+    }
+
+    let budget=Math.max(0,surplus-committed);
+    const external=[];
+    if(shop.enabled&&trade.enabled&&trade.acceptExternal&&budget>0){
+      const rows=listingRows(visibleMerchants).filter(row=>{
+        const l=row.listing,w=l.want||{};
+        if(String(w.name||'')!==offered)return false;
+        if(!trade.flavors.includes(String(l.name||''))||String(l.name||'')===offered)return false;
+        if(Number(remainingDeficits[l.name]||0)<=0)return false;
+        const give=Math.max(1,Number(w.q||1)),receive=Math.max(1,Number(l.q||1));
+        return receive/give>=trade.minReceivePerBlueberry;
+      }).sort((a,b)=>{
+        const ar=Math.max(1,Number(a.listing.q||1))/Math.max(1,Number(a.listing.want&&a.listing.want.q||1));
+        const br=Math.max(1,Number(b.listing.q||1))/Math.max(1,Number(b.listing.want&&b.listing.want.q||1));
+        return br-ar||String(a.merchant.id||a.merchant.name||'').localeCompare(String(b.merchant.id||b.merchant.name||''));
+      });
+      for(const row of rows){
+        const give=Math.max(1,Number(row.listing.want.q||1)),receive=Math.max(1,Number(row.listing.q||1));
+        if(give>budget||receive>Number(remainingDeficits[row.listing.name]||0))continue;
+        external.push({targetId:String(row.merchant.id||row.merchant.name||''),slot:row.slot,give:{name:offered,q:give},receive:{name:row.listing.name,q:receive},rid:row.listing.rid||null,reason:'EXTERNAL_SLICE_BALANCE'});
+        budget-=give;remainingDeficits[row.listing.name]=Math.max(0,remainingDeficits[row.listing.name]-receive);
+        if(budget<=0)break;
+      }
+    }
+
+    const ownOffers=[];
+    if(shop.enabled&&trade.enabled&&trade.createOwnOffers&&budget>0&&keptOffers.length<trade.maxOwnOffers){
+      const slots=freeTradeSlots(standSlots,Math.max(0,trade.maxOwnOffers-keptOffers.length));
+      const needed=trade.flavors.filter(name=>name!==offered&&remainingDeficits[name]>0).sort((a,b)=>remainingDeficits[b]-remainingDeficits[a]||a.localeCompare(b));
+      for(let i=0;i<needed.length&&i<slots.length&&budget>0;i++){
+        ownOffers.push({slot:slots[i],give:{name:offered,q:1},want:{name:needed[i],q:1},quantity:1,reason:'BALANCE_DEFICIT'});
+        budget--;
+        remainingDeficits[needed[i]]=Math.max(0,remainingDeficits[needed[i]]-1);
+      }
+    }
+
+    const inventoryBlue=inventoryQuantity(inventory,offered);
+    const requiredBlue=ownOffers.reduce((n,x)=>n+x.give.q,0)+external.reduce((n,x)=>n+x.give.q,0);
+    const bankPull=[];
+    if(trade.useBank&&requiredBlue>inventoryBlue){
+      let remaining=requiredBlue-inventoryBlue;
+      for(const src of bankSources(bank,offered)){
+        if(remaining<=0)break;
+        bankPull.push({kind:'SHOP_TRADE',name:offered,quantity:qty(src.item),source:{pack:src.pack,slot:src.slot},reason:'BLUEBERRY_TRADE_STAGING'});
+        remaining-=qty(src.item);
+      }
+    }
+
+    return{
+      ok:true,target,counts,balanced:trade.flavors.every(x=>counts[x]>=target),surplus:{[offered]:surplus},deficits,
+      remainingDeficits,keptOffers,cancelOffers,ownOffers,externalTrades:external,bankPull,
+      committed:{[offered]:committed},
+      settings:clone(trade)
+    };
+  }
+  function snapshot(){return{version:1,target};}
+  function restore(saved){if(!saved||saved.version!==1)throw new Error('SHOP_TRADE_SNAPSHOT_INVALID');target=Math.max(1,Number(saved.target||20));return snapshot();}
+  return{plan,snapshot,restore,getTarget:()=>target};
+}
+
+module.exports={createTradeLimb,countFlavors,advanceTarget,sourceBankEntries,freeTradeSlots,listingRows,tradeSlotRows,existingOwnOffers};
+
+},{"../ShopConfig":"ligaments/shop/ShopConfig.js"}],
+"ligaments/skills/CooldownService.js":[function(require,module,exports){
+'use strict';
+
+function clone(v){return v==null?v:JSON.parse(JSON.stringify(v));}
+
+function createCooldownService({now=Date.now,arbiter=null}={}){
+  const skills=new Map();
+
+  function observe(skill,{ready=null,readyAt=null}={}){
+    const key=String(skill||'');
+    if(!key)return{ok:false,error:'SKILL_REQUIRED'};
+    const row=skills.get(key)||{skill:key,ready:null,ready_at:null,updated_at:null};
+    if(ready!=null)row.ready=ready===true;
+    if(readyAt!=null)row.ready_at=Number(readyAt);
+    row.updated_at=Number(now());
+    skills.set(key,row);
+    return{ok:true,status:clone(row)};
+  }
+
+  function status(skill){
+    const key=String(skill||''),row=skills.get(key);
+    if(!row)return{skill:key,ready:false,reason:'UNKNOWN'};
+    const t=Number(now());
+    const timeReady=row.ready_at==null?true:t>=Number(row.ready_at);
+    return{...clone(row),ready:row.ready===true&&timeReady};
+  }
+
+  function acquire(skill,owner,{priority=0}={}){
+    const s=status(skill);
+    if(!s.ready)return{ok:false,error:'SKILL_COOLDOWN',status:s};
+    if(!arbiter)return{ok:true,lease:null};
+    return arbiter.acquire('SKILL:'+String(skill),String(owner||''),{priority,allowPreempt:true});
+  }
+
+  function release(skill,owner){
+    if(!arbiter)return{ok:true,released:false};
+    return arbiter.release('SKILL:'+String(skill),String(owner||''));
+  }
+
+  function all(){return Array.from(skills.keys()).sort().map(status);}
+  return{observe,status,acquire,release,all};
+}
+
+module.exports={createCooldownService};
+
+},{}],
+"ligaments/skills/MluckService.js":[function(require,module,exports){
+'use strict';
+
+// Version-neutral V3 Merchant skill lane. The Adventure.Land adapter owns
+// actual native skill calls; this service handles policy and decisions only.
+function createMluckService({adapter,now=Date.now,refreshBelowMs=15*60000,retryMs=5000}={}){
+  if(!adapter||typeof adapter.snapshot!=='function'||typeof adapter.cast!=='function')throw Error('MLUCK_ADAPTER_REQUIRED');
+  let lastAttempt={},lastCast=null,busy=false,casts=0;
+  const names=['Hibari','Souji','Harutora'];
+  function reason(row,crew,at){
+    if(!row||row.visible===false||row.inRange===false||row.dead===true)return null;
+    const buff=row.mluck||null,owner=String(buff&&buff.owner||'');
+    if(!buff)return 'MISSING';
+    if(owner==='Rentaro'&&Number(buff.remaining_ms)<=refreshBelowMs)return 'REFRESH';
+    if(owner==='Rentaro')return null;
+    if(crew)return 'RECLAIM_CREW';
+    if(buff.strong===true)return null;
+    if(!owner)return null;
+    if(row.foreignOwnerOnline!==false)return null;
+    return 'RECLAIM_ABSENT_MERCHANT';
+  }
+  async function tick(){
+    if(busy)return{ok:true,cast:false,reason:'BUSY'};
+    busy=true;
+    try{
+      const snapshot=await adapter.snapshot();
+      if(!snapshot||snapshot.rip||snapshot.dead||snapshot.threatened||snapshot.cooldownReady===false)return{ok:true,cast:false,reason:'UNSAFE_OR_COOLDOWN'};
+      const nowMs=Number(now());
+      const peers=(Array.isArray(snapshot.nearby)?snapshot.nearby:[]).filter(Boolean);
+      const own=peers.find(x=>x.name==='Rentaro')||snapshot.self||null;
+      const ordered=[own,...names.map(n=>peers.find(x=>x.name===n)),...peers.filter(x=>!names.includes(x.name)&&x.name!=='Rentaro')].filter(Boolean);
+      for(const item of ordered){
+        const name=String(item.name||'');if(!name)continue;
+        const why=reason(item,name==='Rentaro'||names.includes(name),nowMs);
+        if(!why||nowMs-Number(lastAttempt[name]||0)<retryMs)continue;
+        lastAttempt[name]=nowMs;
+        const res=await adapter.cast('mluck',name);
+        if(!res||res.ok===false)continue;
+        casts++;lastCast={name,reason:why,at:nowMs};
+        return{ok:true,cast:true,target:name,reason:why};
+      }
+      return{ok:true,cast:false,reason:'NO_ELIGIBLE_TARGET'};
+    }finally{busy=false;}
+  }
+  function status(){return{casts,lastCast,busy,retryMs,refreshBelowMs,policy:'CREW_FIRST_COMMUNITY_IF_NEEDED_NO_CHASE'};}
+  return{tick,status};
+}
+module.exports={createMluckService};
+
+},{}],
+"ligaments/targeting/TargetingService.js":[function(require,module,exports){
+'use strict';
+
+function clone(v){return v==null?v:JSON.parse(JSON.stringify(v));}
+
+function createTargetingService({now=Date.now,leaseMs=3000}={}){
+  let observed={};
+  let lease=null;
+
+  function observe(entities={}){
+    observed={};
+    for(const [id,value] of Object.entries(entities||{}))observed[String(id)]=clone(value);
+    return{ok:true,count:Object.keys(observed).length};
+  }
+
+  function validTarget(entity){
+    return !!entity&&entity.type==='monster'&&entity.dead!==true&&entity.rip!==true&&entity.visible!==false;
+  }
+
+  function select({predicate=()=>true,score=()=>0}={}){
+    const rows=[];
+    for(const [id,entity] of Object.entries(observed)){
+      if(!validTarget(entity)||predicate(entity,id)!==true)continue;
+      rows.push({id,entity:clone(entity),score:Number(score(entity,id))||0});
+    }
+    rows.sort((a,b)=>b.score-a.score||a.id.localeCompare(b.id));
+    return rows[0]||null;
+  }
+
+  function acquire(owner,targetId,{priority=0}={}){
+    const who=String(owner||''),id=String(targetId||''),t=Number(now());
+    if(!who||!id)return{ok:false,error:'TARGET_OWNER_AND_ID_REQUIRED'};
+    const entity=observed[id];
+    if(!validTarget(entity))return{ok:false,error:'TARGET_NOT_VISIBLE_OR_VALID'};
+    if(lease&&lease.expires_at>t&&lease.owner!==who&&Number(priority)<=Number(lease.priority||0)){
+      return{ok:false,error:'TARGET_OWNED',lease:clone(lease)};
+    }
+    const preempted=lease&&lease.expires_at>t?clone(lease):null;
+    lease={owner:who,target_id:id,priority:Number(priority)||0,acquired_at:t,expires_at:t+Number(leaseMs)};
+    return{ok:true,lease:clone(lease),preempted};
+  }
+
+  function renew(owner,targetId){
+    const who=String(owner||''),id=String(targetId||''),t=Number(now());
+    if(!lease||lease.owner!==who||lease.target_id!==id)return{ok:false,error:'TARGET_LEASE_NOT_OWNED'};
+    if(!validTarget(observed[id]))return{ok:false,error:'TARGET_NOT_VISIBLE_OR_VALID'};
+    lease.expires_at=t+Number(leaseMs);
+    return{ok:true,lease:clone(lease)};
+  }
+
+  function authorize(owner,targetId){
+    const t=Number(now()),who=String(owner||''),id=String(targetId||'');
+    if(!lease||lease.expires_at<=t)return{ok:false,error:'TARGET_LEASE_EXPIRED'};
+    if(lease.owner!==who||lease.target_id!==id)return{ok:false,error:'TARGET_LEASE_MISMATCH',lease:clone(lease)};
+    if(!validTarget(observed[id]))return{ok:false,error:'TARGET_NOT_VISIBLE_OR_VALID'};
+    return{ok:true,target:clone(observed[id]),lease:clone(lease)};
+  }
+
+  function release(owner){
+    if(!lease)return{ok:true,released:false};
+    if(lease.owner!==String(owner||''))return{ok:false,error:'TARGET_LEASE_OWNER_MISMATCH'};
+    lease=null;
+    return{ok:true,released:true};
+  }
+
+  function status(){return{lease:clone(lease),observed:Object.keys(observed).length};}
+  return{observe,select,acquire,renew,authorize,release,status};
+}
+
+module.exports={createTargetingService};
+
+},{}],
+"navigation/MerchantSafeSpotTravel.js":[function(require,module,exports){
+'use strict';
+
+// A fighter independently executes Rentaro's pinned PogiPath v29 route.
+// Each walking leg is native move(). Town/transport are the exact recorded
+// map transitions, not smart_move or guessed cross-map movement.
+const atlas=require('./Order66RentaroSafeSpotTravelAtlas20261122.json');
+const SAFE_SPOT=Object.freeze({...atlas.safeSpot});
+const FARM_SPOT=Object.freeze({...atlas.farmPosition});
+const finite=n=>Number.isFinite(n);
+const distance=(a,b)=>Math.hypot(Number(a.x)-Number(b.x),Number(a.y)-Number(b.y));
+const close=(a,b,r=14)=>!!a&&!!b&&a.map===b.map&&finite(a.x)&&finite(a.y)&&distance(a,b)<=r;
+function hold(reason,extra={}){return{ok:true,progress:false,kind:'SAFE_TRAVEL_WAIT',reason,...extra};}
+function asPoint(map,p){return{map,x:Number(p.x),y:Number(p.y)};}
+function positionFor(action){
+  if(action.op==='move')return asPoint(action.map,action);
+  if(action.op==='transport'&&Array.isArray(action.sourcePoint))
+    return{map:action.map,x:action.sourcePoint[0],y:action.sourcePoint[1]};
+  return null;
+}
+
+function selectStage(map,self,movement){
+  const options=atlas.stages[String(map||'')]||[];
+  if(!options.length)return null;
+  // Town is the verified merchant join point for maps with a recorded
+  // Town cast. This avoids attempting a straight line across uncharted walls.
+  const town=options.find(s=>s.actions[0]&&s.actions[0].op==='town');
+  if(town)return{actions:town.actions,index:0,sourceIndices:town.sourceIndices};
+  // Prefer merchant's direct R12 return corridor where physically reachable.
+  // If the player entered Level 1/2 from Main and cannot reach it, use the
+  // additional recorded R11 door approach, not a guessed cross-map shortcut.
+  // Never select a waypoint unless the live can_move_to proves the join leg.
+  for(const stage of options){
+    let best=null;
+    for(let i=0;i<stage.actions.length;i++){
+      const point=positionFor(stage.actions[i]);
+      if(!point||distance(self,point)>135)continue;
+      if(typeof movement.canMoveTo!=='function'||movement.canMoveTo(point)!==true)continue;
+      const score=distance(self,point)+i*0.2;
+      if(!best||score<best.score)best={actions:stage.actions,index:i,
+        sourceIndices:stage.sourceIndices,score};
+    }
+    if(best)return best;
+  }
+  return null;
+}
+
+function createMerchantSafeSpotTravel({movement,now=Date.now,safeSpot=SAFE_SPOT}={}){
+  if(!movement||typeof movement.move!=='function')throw Error('MERCHANT_SAFE_TRAVEL_MOVEMENT_REQUIRED');
+  const destination={...safeSpot};
+  let map=null,sourceIndices=null,option=null,index=0,pending=null,failures=0;
+  function status(){return{
+    map,sourceIndices:sourceIndices?sourceIndices.slice():null,index,
+    pending:pending?{...pending}:null,failures,safeSpot:{...destination}
+  };}
+  function restore(saved={}){
+    // Replan from live location after restore; don't replay a teleport because
+    // a saved snapshot said it was pending.
+    map=null;option=null;sourceIndices=null;index=0;pending=null;failures=0;
+  }
+  function reset(){restore();}
+  async function tick(self,{owner='FARM'}={}){
+    if(!self||!self.map||!finite(self.x)||!finite(self.y))
+      return hold('SAFE_TRAVEL_SELF_POSITION_REQUIRED');
+    if(close(self,destination,destination.radius)){
+      reset();
+      return{ok:true,progress:false,kind:'SAFE_END_REACHED',target:{...destination}};
+    }
+
+    // For fighters already beside green scorpions, use the short direct
+    // return only if the live geometry says the entire leg is walkable.
+    if(self.map===destination.map&&distance(self,destination)<=300&&
+       !pending&&typeof movement.canMoveTo==='function'&&movement.canMoveTo(destination)===true){
+      const own=movement.acquire(owner,{priority:50});
+      if(!own||own.ok===false)return hold('SAFE_MOVE_OWNERSHIP_BUSY');
+      try{
+        const result=await movement.move(owner,asPoint(destination.map,destination));
+        if(!result||result.ok!==true)return hold('SAFE_MOVE_REJECTED',{detail:result});
+        pending={kind:'move',map:self.map,target:asPoint(destination.map,destination),issuedAt:Number(now()),direct:true};
+        return{ok:true,progress:true,kind:'SAFE_MOVE_DISPATCHED',target:asPoint(destination.map,destination)};
+      }finally{movement.release(owner);}
+    }
+
+    if(pending){
+      const p=pending;
+      const complete=p.kind==='move'?close(self,p.target,14):
+        p.kind==='town'?close(self,{map:p.map,x:0,y:0},55):
+        p.kind==='transport'?self.map===p.to&&
+          (!p.arrival||distance(self,{x:p.arrival[0],y:p.arrival[1]})<=130):false;
+      if(complete){
+        pending=null;failures=0;
+        if(p.kind==='transport'){map=null;option=null;sourceIndices=null;index=0;}
+        else if(!p.direct&&p.transportOrigin!==true)index++;
+      }else if(Number(now())-Number(p.issuedAt||0)>12000){
+        pending=null;
+        failures++;
+        if(failures>=3)return hold('SAFE_TRAVEL_STEP_FAILED_NEEDS_ROUTE_REVIEW',{step:p});
+        // A normal tick can reattempt the exact same merchant step.
+      }else return hold('SAFE_TRAVEL_STEP_IN_FLIGHT',{step:p});
+    }
+    if(map!==self.map||!option){
+      const chosen=selectStage(self.map,self,movement);
+      if(!chosen)return hold('SAFE_TRAVEL_NO_REACHABLE_MERCHANT_ROUTE',{map:self.map});
+      map=self.map;option=chosen.actions;sourceIndices=chosen.sourceIndices;
+      index=chosen.index;failures=0;
+    }
+    // When a Main-side Level1/Level2 path joins Rentaro's direct-return
+    // corridor, switch to that corridor at the first collision-clear junction.
+    // Avoid walking out to Level2/Spooky and looping back unnecessarily.
+    if((self.map==='level1'&&sourceIndices&&sourceIndices[0]===256)||
+       (self.map==='level2'&&sourceIndices&&sourceIndices[0]===287)){
+      const better=selectStage(self.map,self,movement);
+      const directStart=self.map==='level1'?345:342;
+      if(better&&better.sourceIndices[0]===directStart){
+        option=better.actions;sourceIndices=better.sourceIndices;index=better.index;
+      }
+    }
+    // A teleport landing may already coincide with Town or several waypoints.
+    // Skip no-op steps in one tick, then execute one native action at most.
+    while(option[index]){
+      const step=option[index];
+      if(step.op==='town'&&close(self,{map:self.map,x:0,y:0},55)){index++;continue;}
+      if(step.op==='move'&&close(self,asPoint(step.map,step),14)){index++;continue;}
+      break;
+    }
+    const action=option[index];
+    if(!action)return hold('SAFE_TRAVEL_STAGE_INCOMPLETE',{map,index});
+    if(action.map!==self.map){
+      // Transitions always occur via an explicit transport() action.
+      return hold('SAFE_TRAVEL_MAP_OUT_OF_SEQUENCE',{map:self.map,step:action.sourceIndex});
+    }
+    const own=movement.acquire(owner,{priority:50});
+    if(!own||own.ok!==true)return hold('SAFE_MOVE_OWNERSHIP_BUSY');
+    try{
+      if(action.op==='town'){
+        if(close(self,{map:self.map,x:0,y:0},55)){
+          index++;
+          return{ok:true,progress:false,kind:'SAFE_TOWN_ALREADY_AT_LANDING'};
+        }
+        if(typeof movement.town!=='function')return hold('SAFE_TOWN_HOOK_UNAVAILABLE');
+        const result=await movement.town(owner);
+        if(!result||result.ok!==true)return hold('SAFE_TOWN_FAILED',{detail:result});
+        pending={kind:'town',map:self.map,issuedAt:Number(now()),sourceIndex:action.sourceIndex};
+        return{ok:true,progress:true,kind:'SAFE_TOWN_DISPATCHED',map:self.map};
+      }
+      if(action.op==='move'){
+        const target=asPoint(action.map,action);
+        if(close(self,target,14)){index++;return{ok:true,progress:false,kind:'SAFE_WAYPOINT_ALREADY_REACHED',target};}
+        if(typeof movement.canMoveTo!=='function'||movement.canMoveTo(target)!==true)
+          return hold('SAFE_MOVE_LIVE_COLLISION_BLOCKED',{target,sourceIndex:action.sourceIndex});
+        const result=await movement.move(owner,target);
+        if(!result||result.ok!==true)return hold('SAFE_MOVE_REJECTED',{target,detail:result});
+        pending={kind:'move',map:self.map,target,issuedAt:Number(now()),sourceIndex:action.sourceIndex};
+        return{ok:true,progress:true,kind:'SAFE_MOVE_DISPATCHED',target,sourceIndex:action.sourceIndex};
+      }
+      if(action.op==='transport'){
+        const source=positionFor(action);
+        if(!source||!action.to||!Number.isInteger(action.spawn))
+          return hold('SAFE_TRANSPORT_RECORD_INVALID',{sourceIndex:action.sourceIndex});
+        if(!close(self,source,50)){
+          if(typeof movement.canMoveTo!=='function'||movement.canMoveTo(source)!==true)
+            return hold('SAFE_TRANSPORT_ORIGIN_NOT_REACHABLE',{sourceIndex:action.sourceIndex});
+          const result=await movement.move(owner,source);
+          if(!result||result.ok!==true)return hold('SAFE_MOVE_REJECTED',{detail:result});
+          pending={kind:'move',map:self.map,target:source,issuedAt:Number(now()),sourceIndex:action.sourceIndex,transportOrigin:true};
+          return{ok:true,progress:true,kind:'SAFE_MOVE_DISPATCHED',target:source};
+        }
+        if(typeof movement.transport!=='function')return hold('SAFE_TRANSPORT_HOOK_UNAVAILABLE');
+        const result=await movement.transport(owner,{to:action.to,spawn:action.spawn});
+        if(!result||result.ok!==true)return hold('SAFE_TRANSPORT_FAILED',{detail:result,sourceIndex:action.sourceIndex});
+        pending={kind:'transport',map:self.map,to:action.to,arrival:action.arrival||null,
+          issuedAt:Number(now()),sourceIndex:action.sourceIndex};
+        return{ok:true,progress:true,kind:'SAFE_TRANSPORT_DISPATCHED',to:action.to,spawn:action.spawn};
+      }
+      return hold('SAFE_TRAVEL_UNKNOWN_MERCHANT_ACTION',{op:action.op});
+    }finally{movement.release(owner);}
+  }
+  return{tick,status,restore,reset};
+}
+module.exports={SAFE_SPOT,FARM_SPOT,selectStage,createMerchantSafeSpotTravel};
+
+},{"./Order66RentaroSafeSpotTravelAtlas20261122.json":"navigation/Order66RentaroSafeSpotTravelAtlas20261122.json"}],
+"navigation/Order66GreenScorpionSafeEndMoveRoute20261122.json":[function(require,module,exports){
+module.exports={
+  "schema": 1,
+  "source": "RENTARO_V29_PINNED_ACTIONS_R18",
+  "sourceTripId": "POGIMAP-RENTARO-ONE-CIRCUIT-V29-20261120",
+  "sourceModelHash": "2dc3472e38cb7136fd8459b9d538a6c2b0902eb4a4581cafd87bdc9b30616950",
+  "sourceActionIndices": [
+    839,
+    863
+  ],
+  "map": "halloween",
+  "safeEnd": {
+    "map": "halloween",
+    "x": -253.55556,
+    "y": 680,
+    "radius": 18
+  },
+  "waypoints": [
+    {
+      "x": -0.66667,
+      "y": 30.66667
+    },
+    {
+      "x": -1.33333,
+      "y": 61.33333
+    },
+    {
+      "x": -2,
+      "y": 92
+    },
+    {
+      "x": -2.66667,
+      "y": 122.66667
+    },
+    {
+      "x": -3.33333,
+      "y": 153.33333
+    },
+    {
+      "x": -4,
+      "y": 184
+    },
+    {
+      "x": -4.66667,
+      "y": 214.66667
+    },
+    {
+      "x": -5.33333,
+      "y": 245.33333
+    },
+    {
+      "x": -6,
+      "y": 276
+    },
+    {
+      "x": -6.66667,
+      "y": 306.66667
+    },
+    {
+      "x": -7.33333,
+      "y": 337.33333
+    },
+    {
+      "x": -8,
+      "y": 368
+    },
+    {
+      "x": -25.45455,
+      "y": 395.63636
+    },
+    {
+      "x": -42.90909,
+      "y": 423.27273
+    },
+    {
+      "x": -60.36364,
+      "y": 450.90909
+    },
+    {
+      "x": -77.81818,
+      "y": 478.54545
+    },
+    {
+      "x": -95.27273,
+      "y": 506.18182
+    },
+    {
+      "x": -112.72727,
+      "y": 533.81818
+    },
+    {
+      "x": -130.18182,
+      "y": 561.45455
+    },
+    {
+      "x": -147.63636,
+      "y": 589.09091
+    },
+    {
+      "x": -165.09091,
+      "y": 616.72727
+    },
+    {
+      "x": -182.54545,
+      "y": 644.36364
+    },
+    {
+      "x": -200,
+      "y": 672
+    },
+    {
+      "x": -224,
+      "y": 680
+    },
+    {
+      "x": -253.55556,
+      "y": 680
+    }
+  ],
+  "method": "native move() only; map/door transitions not inferred",
+  "status": "PINNED_MERCHANT_REFERENCE_NOT_EDITABLE_DRAFT"
+}
+;
+},{}],
+"navigation/Order66RentaroSafeSpotTravelAtlas20261122.json":[function(require,module,exports){
+module.exports={
+  "schema": 2,
+  "source": "RENTARO_PINNED_POGIPATH_V29",
+  "sourceTripId": "POGIMAP-RENTARO-ONE-CIRCUIT-V29-20261120",
+  "sourceModelHash": "2dc3472e38cb7136fd8459b9d538a6c2b0902eb4a4581cafd87bdc9b30616950",
+  "walking": "move()",
+  "transitions": "recorded town/transport only",
+  "safeSpot": {
+    "id": "xscorpion",
+    "label": "Green Scorpion Safe End #25",
+    "map": "halloween",
+    "x": -253.55556,
+    "y": 680,
+    "radius": 18
+  },
+  "farmPosition": {
+    "map": "halloween",
+    "x": -495.5,
+    "y": 685.5
+  },
+  "stages": {
+    "main": [
+      {
+        "sourceIndices": [
+          715,
+          837
+        ],
+        "actions": [
+          {
+            "sourceIndex": 715,
+            "op": "town",
+            "map": "main"
+          },
+          {
+            "sourceIndex": 716,
+            "op": "move",
+            "map": "main",
+            "x": 0.8,
+            "y": 32
+          },
+          {
+            "sourceIndex": 717,
+            "op": "move",
+            "map": "main",
+            "x": 1.6,
+            "y": 64
+          },
+          {
+            "sourceIndex": 718,
+            "op": "move",
+            "map": "main",
+            "x": 2.4,
+            "y": 96
+          },
+          {
+            "sourceIndex": 719,
+            "op": "move",
+            "map": "main",
+            "x": 3.2,
+            "y": 128
+          },
+          {
+            "sourceIndex": 720,
+            "op": "move",
+            "map": "main",
+            "x": 4,
+            "y": 160
+          },
+          {
+            "sourceIndex": 721,
+            "op": "move",
+            "map": "main",
+            "x": 4.8,
+            "y": 192
+          },
+          {
+            "sourceIndex": 722,
+            "op": "move",
+            "map": "main",
+            "x": 5.6,
+            "y": 224
+          },
+          {
+            "sourceIndex": 723,
+            "op": "move",
+            "map": "main",
+            "x": 6.4,
+            "y": 256
+          },
+          {
+            "sourceIndex": 724,
+            "op": "move",
+            "map": "main",
+            "x": 7.2,
+            "y": 288
+          },
+          {
+            "sourceIndex": 725,
+            "op": "move",
+            "map": "main",
+            "x": 8,
+            "y": 320
+          },
+          {
+            "sourceIndex": 726,
+            "op": "move",
+            "map": "main",
+            "x": 8.8,
+            "y": 352
+          },
+          {
+            "sourceIndex": 727,
+            "op": "move",
+            "map": "main",
+            "x": 9.6,
+            "y": 384
+          },
+          {
+            "sourceIndex": 728,
+            "op": "move",
+            "map": "main",
+            "x": 10.4,
+            "y": 416
+          },
+          {
+            "sourceIndex": 729,
+            "op": "move",
+            "map": "main",
+            "x": 11.2,
+            "y": 448
+          },
+          {
+            "sourceIndex": 730,
+            "op": "move",
+            "map": "main",
+            "x": 12,
+            "y": 480
+          },
+          {
+            "sourceIndex": 731,
+            "op": "move",
+            "map": "main",
+            "x": 12.8,
+            "y": 512
+          },
+          {
+            "sourceIndex": 732,
+            "op": "move",
+            "map": "main",
+            "x": 13.6,
+            "y": 544
+          },
+          {
+            "sourceIndex": 733,
+            "op": "move",
+            "map": "main",
+            "x": 14.4,
+            "y": 576
+          },
+          {
+            "sourceIndex": 734,
+            "op": "move",
+            "map": "main",
+            "x": 15.2,
+            "y": 608
+          },
+          {
+            "sourceIndex": 735,
+            "op": "move",
+            "map": "main",
+            "x": 16,
+            "y": 640
+          },
+          {
+            "sourceIndex": 736,
+            "op": "move",
+            "map": "main",
+            "x": 38.76923,
+            "y": 663.38462
+          },
+          {
+            "sourceIndex": 737,
+            "op": "move",
+            "map": "main",
+            "x": 61.53846,
+            "y": 686.76923
+          },
+          {
+            "sourceIndex": 738,
+            "op": "move",
+            "map": "main",
+            "x": 84.30769,
+            "y": 710.15385
+          },
+          {
+            "sourceIndex": 739,
+            "op": "move",
+            "map": "main",
+            "x": 107.07692,
+            "y": 733.53846
+          },
+          {
+            "sourceIndex": 740,
+            "op": "move",
+            "map": "main",
+            "x": 129.84615,
+            "y": 756.92308
+          },
+          {
+            "sourceIndex": 741,
+            "op": "move",
+            "map": "main",
+            "x": 152.61538,
+            "y": 780.30769
+          },
+          {
+            "sourceIndex": 742,
+            "op": "move",
+            "map": "main",
+            "x": 175.38462,
+            "y": 803.69231
+          },
+          {
+            "sourceIndex": 743,
+            "op": "move",
+            "map": "main",
+            "x": 198.15385,
+            "y": 827.07692
+          },
+          {
+            "sourceIndex": 744,
+            "op": "move",
+            "map": "main",
+            "x": 220.92308,
+            "y": 850.46154
+          },
+          {
+            "sourceIndex": 745,
+            "op": "move",
+            "map": "main",
+            "x": 243.69231,
+            "y": 873.84615
+          },
+          {
+            "sourceIndex": 746,
+            "op": "move",
+            "map": "main",
+            "x": 266.46154,
+            "y": 897.23077
+          },
+          {
+            "sourceIndex": 747,
+            "op": "move",
+            "map": "main",
+            "x": 289.23077,
+            "y": 920.61538
+          },
+          {
+            "sourceIndex": 748,
+            "op": "move",
+            "map": "main",
+            "x": 312,
+            "y": 944
+          },
+          {
+            "sourceIndex": 749,
+            "op": "move",
+            "map": "main",
+            "x": 339.5,
+            "y": 961
+          },
+          {
+            "sourceIndex": 750,
+            "op": "move",
+            "map": "main",
+            "x": 367,
+            "y": 978
+          },
+          {
+            "sourceIndex": 751,
+            "op": "move",
+            "map": "main",
+            "x": 394.5,
+            "y": 995
+          },
+          {
+            "sourceIndex": 752,
+            "op": "move",
+            "map": "main",
+            "x": 422,
+            "y": 1012
+          },
+          {
+            "sourceIndex": 753,
+            "op": "move",
+            "map": "main",
+            "x": 449.5,
+            "y": 1029
+          },
+          {
+            "sourceIndex": 754,
+            "op": "move",
+            "map": "main",
+            "x": 477,
+            "y": 1046
+          },
+          {
+            "sourceIndex": 755,
+            "op": "move",
+            "map": "main",
+            "x": 504.5,
+            "y": 1063
+          },
+          {
+            "sourceIndex": 756,
+            "op": "move",
+            "map": "main",
+            "x": 532,
+            "y": 1080
+          },
+          {
+            "sourceIndex": 757,
+            "op": "move",
+            "map": "main",
+            "x": 559.5,
+            "y": 1097
+          },
+          {
+            "sourceIndex": 758,
+            "op": "move",
+            "map": "main",
+            "x": 587,
+            "y": 1114
+          },
+          {
+            "sourceIndex": 759,
+            "op": "move",
+            "map": "main",
+            "x": 614.5,
+            "y": 1131
+          },
+          {
+            "sourceIndex": 760,
+            "op": "move",
+            "map": "main",
+            "x": 642,
+            "y": 1148
+          },
+          {
+            "sourceIndex": 761,
+            "op": "move",
+            "map": "main",
+            "x": 669.5,
+            "y": 1165
+          },
+          {
+            "sourceIndex": 762,
+            "op": "move",
+            "map": "main",
+            "x": 697,
+            "y": 1182
+          },
+          {
+            "sourceIndex": 763,
+            "op": "move",
+            "map": "main",
+            "x": 724.5,
+            "y": 1199
+          },
+          {
+            "sourceIndex": 764,
+            "op": "move",
+            "map": "main",
+            "x": 752,
+            "y": 1216
+          },
+          {
+            "sourceIndex": 765,
+            "op": "move",
+            "map": "main",
+            "x": 782.85714,
+            "y": 1216
+          },
+          {
+            "sourceIndex": 766,
+            "op": "move",
+            "map": "main",
+            "x": 813.71429,
+            "y": 1216
+          },
+          {
+            "sourceIndex": 767,
+            "op": "move",
+            "map": "main",
+            "x": 844.57143,
+            "y": 1216
+          },
+          {
+            "sourceIndex": 768,
+            "op": "move",
+            "map": "main",
+            "x": 875.42857,
+            "y": 1216
+          },
+          {
+            "sourceIndex": 769,
+            "op": "move",
+            "map": "main",
+            "x": 906.28571,
+            "y": 1216
+          },
+          {
+            "sourceIndex": 770,
+            "op": "move",
+            "map": "main",
+            "x": 937.14286,
+            "y": 1216
+          },
+          {
+            "sourceIndex": 771,
+            "op": "move",
+            "map": "main",
+            "x": 968,
+            "y": 1216
+          },
+          {
+            "sourceIndex": 772,
+            "op": "move",
+            "map": "main",
+            "x": 976,
+            "y": 1194.66667
+          },
+          {
+            "sourceIndex": 773,
+            "op": "move",
+            "map": "main",
+            "x": 984,
+            "y": 1173.33333
+          },
+          {
+            "sourceIndex": 774,
+            "op": "move",
+            "map": "main",
+            "x": 992,
+            "y": 1152
+          },
+          {
+            "sourceIndex": 775,
+            "op": "move",
+            "map": "main",
+            "x": 1004,
+            "y": 1126
+          },
+          {
+            "sourceIndex": 776,
+            "op": "move",
+            "map": "main",
+            "x": 1016,
+            "y": 1100
+          },
+          {
+            "sourceIndex": 777,
+            "op": "move",
+            "map": "main",
+            "x": 1028,
+            "y": 1074
+          },
+          {
+            "sourceIndex": 778,
+            "op": "move",
+            "map": "main",
+            "x": 1040,
+            "y": 1048
+          },
+          {
+            "sourceIndex": 779,
+            "op": "move",
+            "map": "main",
+            "x": 1068,
+            "y": 1042.66667
+          },
+          {
+            "sourceIndex": 780,
+            "op": "move",
+            "map": "main",
+            "x": 1096,
+            "y": 1037.33333
+          },
+          {
+            "sourceIndex": 781,
+            "op": "move",
+            "map": "main",
+            "x": 1124,
+            "y": 1032
+          },
+          {
+            "sourceIndex": 782,
+            "op": "move",
+            "map": "main",
+            "x": 1152,
+            "y": 1026.66667
+          },
+          {
+            "sourceIndex": 783,
+            "op": "move",
+            "map": "main",
+            "x": 1180,
+            "y": 1021.33333
+          },
+          {
+            "sourceIndex": 784,
+            "op": "move",
+            "map": "main",
+            "x": 1208,
+            "y": 1016
+          },
+          {
+            "sourceIndex": 785,
+            "op": "move",
+            "map": "main",
+            "x": 1212,
+    
