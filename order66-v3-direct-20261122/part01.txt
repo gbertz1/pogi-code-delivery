@@ -1,0 +1,1417 @@
+sources:['COMBAT','GEAR'],
+    available:ctx=>!!(ctx.adapters&&ctx.adapters.fighter),
+    factory:async ctx=>wrapped(createFighterActionExecutor({
+      combat:ctx.services.Combat,
+      gear:ctx.services.Gear,
+      skills:ctx.adapters.fighter,
+      combatOwner:'FARM'
+    }))
+  });
+
+  catalog.register('Farm',{
+    dependencies:['Targeting','PartyCoordination','Movement','Combat','Cooldowns'],
+    resources:['MOVEMENT','COMBAT'],
+    factory:async ctx=>{
+      const service=createFarmState({
+        character:ctx.character,
+        targeting:ctx.services.Targeting,
+        party:ctx.services.PartyCoordination,
+        movement:ctx.services.Movement,
+        combat:ctx.services.Combat,
+        controller:
+          ctx.role==='WARRIOR'?ctx.services.WarriorCombat:
+          ctx.role==='MAGE'?ctx.services.MageCombat:
+          ctx.role==='PRIEST'?(ctx.services.PriestCombat||createPriestController({
+            party:ctx.services.PartyCoordination,
+            cooldowns:ctx.services.Cooldowns,
+            character:ctx.character
+          })):null,
+        actionExecutor:ctx.services.FighterActions||null,
+        fighter:ctx.adapters&&ctx.adapters.fighter||null,
+        gear:ctx.services.Gear||null,
+        config:ctx.config&&ctx.config.farm||{}
+      });
+      return{
+        service,
+        module:{
+          start:async()=>service.start(),
+          pause:async()=>service.pause(),
+          resume:async()=>service.resume(),
+          health:async()=>service.health(),
+          snapshot:async()=>service.snapshot(),
+          restore:async value=>service.restore(value),
+          stop:async()=>service.stop(),
+          detach:async()=>service.stop()
+        }
+      };
+    }
+  });
+
+  catalog.register('Stand',{
+    resources:['STAND'],
+    available:ctx=>!!(ctx.adapters&&ctx.adapters.stand),
+    factory:async ctx=>{
+      const service=createStandState({adapter:ctx.adapters.stand,now:ctx.now||Date.now});
+      return{
+        service,
+        module:{
+          start:async()=>service.initialize(),
+          pause:async()=>service.pause(),
+          resume:async()=>({ok:true,initialized:true}),
+          health:async()=>service.health(),
+          snapshot:async()=>service.snapshot(),
+          restore:async value=>service.restore(value),
+          stop:async()=>service.stop(),
+          detach:async()=>service.stop()
+        }
+      };
+    }
+  });
+
+  catalog.register('Shop',{
+    dependencies:['Inventory','BankTravel'],
+    resources:['SHOP'],
+    available:ctx=>!!(
+      ctx.adapters&&ctx.adapters.shop&&
+      ctx.adapters.bank&&
+      typeof ctx.adapters.bank.snapshot==='function'&&
+      typeof ctx.adapters.bank.retrieve==='function'
+    ),
+    factory:async ctx=>{
+      const limb=createShopLimb();
+      const inventory=ctx.services.Inventory;
+      const retrieveOps=createBankRetrieveOps({
+        adapter:ctx.adapters.bank,
+        inventory,
+        travel:ctx.services.BankTravel
+      });
+      const service=createShopService({
+        shop:limb,
+        inventory,
+        adapter:ctx.adapters.shop,
+        bankSnapshot:async()=>ctx.adapters.bank.snapshot()
+      });
+      const bankHandoff=createShopBankHandoff({shop:limb,bankRetrieve:retrieveOps});
+      service.bankHandoff=async()=>{
+        await service.plan();
+        return bankHandoff.handoff();
+      };
+      return wrapped(service);
+    }
+  });
+
+  catalog.register('Bank',{
+    dependencies:['Inventory','Movement','BankTravel'],
+    resources:['MOVEMENT','INVENTORY','BANK_ACCESS'],
+    available:ctx=>!!(ctx.adapters&&ctx.adapters.bankOps),
+    factory:async ctx=>{
+      const base=ctx.adapters.bankOps;
+      const ops={};
+      for(const name of ['enter','scan','apply_policy','organize','verify','publish','exit']){
+        if(typeof base[name]==='function')ops[name]=base[name].bind(base);
+      }
+      ops.travel=ctx.services.BankTravel.travel;
+      const gearOps=ctx.services.GearHandoff?createBankHandoffOps({gearHandoff:ctx.services.GearHandoff}):null;
+      ops.handoff=async()=>{
+        const gearActive=ctx.services.GearHandoff&&typeof ctx.services.GearHandoff.status==='function'?ctx.services.GearHandoff.status():null;
+        if(gearActive&&gearOps)return gearOps.handoff();
+        if(ctx.services.Shop&&typeof ctx.services.Shop.bankHandoff==='function'){
+          const shopResult=await ctx.services.Shop.bankHandoff();
+          if(shopResult&&shopResult.skipped!==true)return shopResult;
+        }
+        if(gearOps)return gearOps.handoff();
+        return{ok:true,skipped:true,reason:'NO_BANK_HANDOFF_WORK'};
+      };
+      return wrapped(createBankState({ops,initialSession:ctx.restore&&ctx.restore.Bank||null,recoveryStore:ctx.bankRecoveryStore||null}));
+    }
+  });
+
+  catalog.register('ScanBoss',{
+    factory:async ctx=>wrapped(createScanBossState({
+      characterName:ctx.character,
+      role:ctx.role,
+      now:ctx.now||Date.now
+    }))
+  });
+
+  catalog.register('Events',{
+    resources:['MOVEMENT'],
+    factory:async ctx=>wrapped(createEventState({
+      handlers:ctx.eventHandlers||{},
+      initialEnabled:ctx.config&&ctx.config.eventsEnabled||{},
+      now:ctx.now||Date.now
+    }))
+  });
+
+  catalog.register('PvpDefense',{
+    resources:['COMBAT','MOVEMENT'],
+    factory:async ctx=>wrapped(createDefensivePvp({
+      whitelist:ctx.config&&ctx.config.pvpWhitelist||[],
+      blacklist:ctx.config&&ctx.config.pvpBlacklist||[],
+      now:ctx.now||Date.now
+    }))
+  });
+
+  catalog.register('WorldBoss',{
+    dependencies:['Targeting','Movement','Combat'],
+    resources:['MOVEMENT','COMBAT'],
+    factory:async ctx=>{
+      const missionConfig=ctx.config&&ctx.config.bossMission||{};
+      const missions=createBossMissionCoordinator({
+        root:ctx.root,
+        characterName:ctx.character,
+        role:ctx.role,
+        now:ctx.now||Date.now,
+        ttlMs:missionConfig.ttlMs,
+        activationRadius:missionConfig.activationRadius,
+        transport:ctx.adapters&&ctx.adapters.bossMission||null
+      });
+      const service=createWorldBossState({
+        character:ctx.character,
+        role:ctx.role,
+        missions,
+        targeting:ctx.services.Targeting,
+        combat:ctx.services.Combat,
+        movement:ctx.services.Movement,
+        fighter:ctx.adapters&&ctx.adapters.fighter||null,
+        stand:ctx.services.Stand||null,
+        config:ctx.config&&ctx.config.worldBoss||{}
+      });
+      service.policy=BossPolicy;
+      service.missions=missions;
+      service.shouldActivate=missions.shouldActivate;
+      service.missionStatus=missions.status;
+      return{
+        service,
+        module:{
+          start:async()=>({ok:true,initialized:true}),
+          pause:async()=>service.pause(),
+          resume:async()=>({ok:true,initialized:true}),
+          health:async()=>service.health(),
+          snapshot:async()=>service.snapshot(),
+          restore:async value=>service.restore(value),
+          stop:async()=>service.stop(),
+          detach:async()=>service.stop()
+        }
+      };
+    }
+  });
+
+  catalog.register('GearHandoff',{
+    dependencies:['Inventory','BankTravel'],
+    resources:['INVENTORY','BANK_ACCESS','GEAR'],
+    available:ctx=>!!(
+      ctx.adapters&&ctx.adapters.bank&&
+      typeof ctx.adapters.bank.snapshot==='function'&&
+      typeof ctx.adapters.bank.retrieve==='function'&&
+      typeof ctx.adapters.bank.store==='function'
+    ),
+    factory:async ctx=>{
+      const protectedSet=new Set((ctx.config&&ctx.config.protectedGear||[]).map(String));
+      const inventory=ctx.services.Inventory;
+      const isProtected=item=>protectedSet.has(String(item&&item.name||''))||protectedSet.has(inventory.identity(item));
+      const planner=createGearHandoffPlanner({isProtected});
+      const retrieveOps=createBankRetrieveOps({
+        adapter:ctx.adapters.bank,
+        inventory,
+        travel:ctx.services.BankTravel
+      });
+      const storeOps=createBankStoreOps({
+        adapter:ctx.adapters.bank,
+        inventory,
+        metaResolver:typeof ctx.adapters.bank.itemMeta==='function'?name=>ctx.adapters.bank.itemMeta(name):null,
+        travel:ctx.services.BankTravel
+      });
+      return wrapped(createGearHandoffService({
+        inventory,retrieveOps,storeOps,planner,controlPlane:GearControlPlane,
+        executorReady:()=>!!(
+          ctx.services.GearProduction&&
+          typeof ctx.services.GearProduction.executionReady==='function'&&
+          ctx.services.GearProduction.executionReady()===true
+        ),
+        now:ctx.now||Date.now
+      }));
+    }
+  });
+
+  catalog.register('GearProduction',{
+    dependencies:['Inventory','Movement','GearHandoff'],
+    resources:['MOVEMENT','INVENTORY','GEAR'],
+    factory:async ctx=>wrapped(createGearProductionExecutor({
+      inventory:ctx.services.Inventory,
+      movement:ctx.services.Movement,
+      handoff:ctx.services.GearHandoff,
+      adapter:ctx.adapters&&ctx.adapters.gearProduction||null,
+      policy:GearControlPlane,
+      now:ctx.now||Date.now
+    }))
+  });
+
+  catalog.register('MerchantController',{
+    dependencies:['Inventory','GearHandoff'],
+    factory:async ctx=>wrapped(createMerchantController({
+      inventory:ctx.services.Inventory,
+      gearHandoff:ctx.services.GearHandoff,
+      shop:ctx.services.Shop,
+      character:ctx.character
+    }))
+  });
+
+  catalog.register('PriestCombat',{
+    dependencies:['PartyCoordination','Cooldowns'],
+    factory:async ctx=>wrapped(createPriestController({
+      party:ctx.services.PartyCoordination,
+      cooldowns:ctx.services.Cooldowns,
+      character:ctx.character
+    }))
+  });
+
+  catalog.register('MageCombat',{
+    dependencies:['PartyCoordination'],
+    factory:async ctx=>wrapped(createMageController({party:ctx.services.PartyCoordination,character:ctx.character}))
+  });
+
+  catalog.register('WarriorCombat',{
+    dependencies:['PartyCoordination'],
+    factory:async ctx=>wrapped(createWarriorController({party:ctx.services.PartyCoordination,character:ctx.character}))
+  });
+
+  return catalog;
+}
+
+module.exports={createDefaultCatalog};
+
+},{"../core/modules/ModuleCatalog":"core/modules/ModuleCatalog.js","../ligaments/movement/MovementService":"ligaments/movement/MovementService.js","../ligaments/inventory/InventoryService":"ligaments/inventory/InventoryService.js","../ligaments/targeting/TargetingService":"ligaments/targeting/TargetingService.js","../ligaments/party/PartyCoordinationService":"ligaments/party/PartyCoordinationService.js","../ligaments/skills/CooldownService":"ligaments/skills/CooldownService.js","../ligaments/skills/MluckService":"ligaments/skills/MluckService.js","../ligaments/gear/GearService":"ligaments/gear/GearService.js","../ligaments/crafting/RecipeIntelligence":"ligaments/crafting/RecipeIntelligence.js","../ligaments/combat/CombatService":"ligaments/combat/CombatService.js","../ligaments/combat/FighterActionExecutor":"ligaments/combat/FighterActionExecutor.js","../organs/farm/FarmState":"organs/farm/FarmState.js","../organs/stand/StandState":"organs/stand/StandState.js","../organs/bank/BankState":"organs/bank/BankState.js","../organs/bank/BankNavigation":"organs/bank/BankNavigation.js","../organs/bank/BankTravelOps":"organs/bank/BankTravelOps.js","../ligaments/gear/GearHandoffService":"ligaments/gear/GearHandoffService.js","../ligaments/gear/GearHandoffPlanner":"ligaments/gear/GearHandoffPlanner.js","../ligaments/shop/ShopLimb":"ligaments/shop/ShopLimb.js","../ligaments/shop/ShopService":"ligaments/shop/ShopService.js","../ligaments/shop/ShopBankHandoff":"ligaments/shop/ShopBankHandoff.js","../organs/bank/BankStoreOps":"organs/bank/BankStoreOps.js","../organs/bank/BankRetrieveOps":"organs/bank/BankRetrieveOps.js","../organs/bank/BankHandoffOps":"organs/bank/BankHandoffOps.js","../organs/bosses/ScanBossState":"organs/bosses/ScanBossState.js","../organs/bosses/BossPolicy":"organs/bosses/BossPolicy.js","../organs/bosses/BossMissionCoordinator":"organs/bosses/BossMissionCoordinator.js","../organs/bosses/WorldBossState":"organs/bosses/WorldBossState.js","../organs/events/EventState":"organs/events/EventState.js","../organs/pvp-defense/DefensivePvp":"organs/pvp-defense/DefensivePvp.js","../organs/gear/GearControlPlane":"organs/gear/GearControlPlane.js","../organs/gear/GearProductionExecutor":"organs/gear/GearProductionExecutor.js","../characters/merchant/MerchantController":"characters/merchant/MerchantController.js","../characters/priest/PriestController":"characters/priest/PriestController.js","../characters/mage/MageController":"characters/mage/MageController.js","../characters/warrior/WarriorController":"characters/warrior/WarriorController.js"}],
+"bootstrap/LiveBootstrap.js":[function(require,module,exports){
+'use strict';
+
+const {bootstrapCharacterV3}=require('./CharacterBootstrap');
+const {createAdventureLandLiveAdapters,auditLiveAdapters}=require('../adapters/adventureland/LiveAdapters');
+
+async function bootstrapCharacterFromAdventureLand({
+  root=(typeof globalThis!=='undefined'?globalThis:{}),
+  character,
+  frameId,
+  bankOps=null,
+  config={},
+  eventHandlers={},
+  restore={},
+  now=Date.now,
+  activationMode='development',
+  requireCompleteRole=true,
+  bootRequest=null,
+  bootstrapOptions={}
+}={}){
+  const adapterAudit=auditLiveAdapters(root);
+  if(!adapterAudit.ok){
+    return{ok:false,error:'LIVE_ADAPTERS_INCOMPLETE',adapterAudit};
+  }
+
+  const adapters=createAdventureLandLiveAdapters(root);
+  if(bankOps&&typeof bankOps==='object')adapters.bankOps=bankOps;
+
+  const result=await bootstrapCharacterV3({
+    root,
+    character,
+    frameId,
+    adapters,
+    config,
+    eventHandlers,
+    restore,
+    now,
+    requireCompleteRole,
+    activationMode,
+    bootRequest,
+    bootstrapOptions
+  });
+
+  return{
+    ...result,
+    adapterAudit,
+    adaptersReady:true,
+    bankOpsConnected:!!adapters.bankOps
+  };
+}
+
+module.exports={bootstrapCharacterFromAdventureLand};
+
+},{"./CharacterBootstrap":"bootstrap/CharacterBootstrap.js","../adapters/adventureland/LiveAdapters":"adapters/adventureland/LiveAdapters.js"}],
+"bootstrap/Manifest.js":[function(require,module,exports){
+'use strict';
+
+const V3_SCHEMA=1;
+const V3_BUILD='2026.10.08-v3-halloween-server-end-expiry-9';
+
+const REQUIRED_CHARACTERS=Object.freeze(['Rentaro','Hibari','Souji','Harutora']);
+const FIGHTERS=Object.freeze(['Hibari','Souji','Harutora']);
+
+const RECOVERY_POLICY=Object.freeze({
+  schema:1,
+  brain:'V3',
+  store:'order66-lkg-v3',
+  generation_required:true,
+  atomic_restore:true,
+  promotion:'VERIFIED_CANDIDATE_ONLY',
+  mixed_generation:'FAIL_CLOSED',
+  restart_count:1,
+  external_restore_ready:false,
+  automatic_rollback_requires_production_identity:true,
+  automatic_rollback_on_alignment_failure:'BLOCK_AND_ALERT',
+  promotion_requires_post_write_alignment:true,
+  recovery_hold_requires_expected_production:true,
+  alignment_watchdog:true,
+  alignment_watchdog_interval_ms:10000,
+  event_boss_terminology:true,
+  event_boss_warrior_rescue_taunt_only:true,
+  event_boss_taunt_protected_targets:Object.freeze(['Harutora','Souji']),
+  event_boss_proactive_taunt:false,
+  event_boss_mage_zap_disabled:true,
+  regular_boss_offense_requires_warrior_present:true,
+  event_boss_offense_requires_warrior_first_hit:true,
+  event_boss_first_hit_latched_for_mission:true,
+  event_boss_first_hit_authority:'HIBARI_SUCCESSFUL_ATTACK',
+  event_boss_first_hit_shared_mission:true,
+  event_boss_same_identity_refresh_preserves_sequence:true,
+  event_boss_first_hit_latched_for_mission:true,
+  event_boss_first_hit_authority:'HIBARI_SUCCESSFUL_ATTACK',
+  event_boss_first_hit_shared_mission:true,
+  event_boss_same_identity_refresh_preserves_sequence:true,
+  mrgreen_server_event_mage_owner:true,
+  mrgreen_mage_rally_magiport:true,
+  mrgreen_fighters_wait_for_mage_rally:true,
+  mrpumpkin_server_event_mage_owner:true,
+  mrpumpkin_server_event_durable_lock:true,
+  mrpumpkin_mage_forced_magiport:false,
+  halloween_server_event_end_clear:true,
+  halloween_server_event_end_mechanism:'LEASE_EXPIRY_WHEN_NOT_REFRESHED',
+  halloween_server_event_end_lease_ms:4000,
+  halloween_server_event_local_visible_republish:true,
+  mrgreen_server_event_end_clear:true,
+  mrpumpkin_server_event_end_clear:true,
+  anti_ks_owner_state:'FARM_MOB',
+  anti_ks_foreign_party_arm_distance:50,
+  anti_ks_world_boss_preempt:true,
+  anti_ks_event_preempt:true,
+  anti_ks_stale_claim_handoff_forbidden:true,
+  anti_ks_boss_target_zap_forbidden:true,
+  anti_ks_boss_target_taunt_forbidden:true,
+  boss_rescue_taunt_independent_of_anti_ks:true,
+  runtime_proof_fields:Object.freeze(['recovery_snapshot_id','recovery_tree_hash'])
+});
+
+const REQUIRED_EVENT_BOSS_POLICY=Object.freeze({
+  event_boss_terminology:true,
+  event_boss_warrior_rescue_taunt_only:true,
+  event_boss_proactive_taunt:false,
+  event_boss_mage_zap_disabled:true,
+  regular_boss_offense_requires_warrior_present:true,
+  event_boss_offense_requires_warrior_first_hit:true,
+  mrgreen_server_event_mage_owner:true,
+  mrgreen_mage_rally_magiport:true,
+  mrgreen_fighters_wait_for_mage_rally:true,
+  mrpumpkin_server_event_mage_owner:true,
+  mrpumpkin_server_event_durable_lock:true,
+  mrpumpkin_mage_forced_magiport:false,
+  halloween_server_event_end_clear:true,
+  halloween_server_event_end_mechanism:'LEASE_EXPIRY_WHEN_NOT_REFRESHED',
+  halloween_server_event_end_lease_ms:4000,
+  halloween_server_event_local_visible_republish:true,
+  mrgreen_server_event_end_clear:true,
+  mrpumpkin_server_event_end_clear:true,
+  anti_ks_world_boss_preempt:true,
+  anti_ks_event_preempt:true,
+  anti_ks_boss_target_zap_forbidden:true,
+  anti_ks_boss_target_taunt_forbidden:true,
+  boss_rescue_taunt_independent_of_anti_ks:true
+});
+function assertEventBossPolicy(policy=RECOVERY_POLICY){
+  for(const [key,expected] of Object.entries(REQUIRED_EVENT_BOSS_POLICY)){
+    if(policy[key]!==expected)throw new Error('V3_EVENT_BOSS_POLICY_REGRESSION_'+key);
+  }
+  const targets=Array.isArray(policy.event_boss_taunt_protected_targets)
+    ?Array.from(policy.event_boss_taunt_protected_targets)
+    :[];
+  if(JSON.stringify(targets)!==JSON.stringify(['Harutora','Souji'])){
+    throw new Error('V3_EVENT_BOSS_POLICY_REGRESSION_event_boss_taunt_protected_targets');
+  }
+  return true;
+}
+assertEventBossPolicy();
+const CORE_MODULES=Object.freeze([
+  'RuntimeEpoch',
+  'FrameLease',
+  'LifecycleSupervisor',
+  'ProductiveHeartbeat',
+  'ModuleSupervisor',
+  'RecoveryVerifier',
+  'RecoveryImageGuard',
+  'DeploymentSafety',
+  'RecoveryCoordinator',
+  'ChangeVerifier',
+  'CoreSupervisor',
+  'ModuleContract',
+  'RoleManifest',
+  'BridgeV3Contract',
+  'ModuleCatalog',
+  'StateCoordinator',
+  'RuntimeScheduler',
+  'ActivationGate',
+  'ReadinessAudit'
+]);
+
+module.exports=Object.freeze({
+  schema:V3_SCHEMA,
+  build:V3_BUILD,
+  root:'adventureland/v3',
+  entrypoint:'adventureland/v3/bootstrap/Bootstrap.js',
+  required_characters:REQUIRED_CHARACTERS,
+  fighters:FIGHTERS,
+  recovery_policy:RECOVERY_POLICY,
+  core_modules:CORE_MODULES,
+  production_selectable:false,
+  allowed_dependency_roots:['adventureland/v3'],
+  allowed_shared_files:[],
+  forbidden_dependency_roots:['adventureland/v2','adventureland/pv2','adventureland/state-v2','api/current'],
+  required_event_boss_policy:REQUIRED_EVENT_BOSS_POLICY,
+  assert_event_boss_policy:assertEventBossPolicy
+});
+
+},{}],
+"bootstrap/Order66DirectLaunch.js":[function(require,module,exports){
+'use strict';
+
+// Order 66: direct existing-tab V3 launch. No Bridge tickets, supervision
+// approval, expired session, GO proofs, or recovery/restart owner.
+// Gameplay safeguards (healing, group readiness, native move paths) remain
+// role-owned and continue operating in the normal scheduler.
+const {bootstrapCharacterFromAdventureLand}=require('./LiveBootstrap');
+const {createPriestHealingHeartbeat}=require('../characters/priest/PriestHealingHeartbeat');
+const ROLES=new Set(['Rentaro','Souji','Hibari','Harutora']);
+
+async function launchOrder66Direct({root=globalThis,now=Date.now}={}){
+ const role=root?.character?.name;
+ if(!ROLES.has(role))return{ok:false,error:'O66_UNKNOWN_CHARACTER'};
+ const prior=root.__POGI_V3_DIRECT_STATUS;
+ if(prior?.active===true)return{ok:true,alreadyRunning:true,status:prior};
+ if(prior?.starting===true)return{ok:true,alreadyStarting:true,status:prior};
+ const status={role,starting:true,active:false,at:Number(now()),error:null,
+  phase:'HEAL_FIRST',runtime:null};
+ root.__POGI_V3_DIRECT_STATUS=status;
+
+ // Keep health first and independent of movement, fight state, or a Mage
+ // boss trip. All party HP observations, even remote party-roster HP, are
+ // checked by the dedicated heartbeat on its first start.
+ if(role==='Souji'){
+  const existing=root.__POGI_V3_PRIEST_HEAL;
+  if(!(existing&&typeof existing.status==='function'&&existing.status().running)){
+   const healer=createPriestHealingHeartbeat({root,now});
+   root.__POGI_V3_PRIEST_HEAL=healer;
+   healer.start();
+  }
+ }
+ // Native Adventure Land party invites/acceptance are separate from the
+ // runtime and require no Bridge or second Chrome tab.
+ if(role!=='Rentaro'&&typeof root.accept_party_invite==='function'){
+  const previous=root.on_party_invite;
+  root.on_party_invite=function(from){
+   if(from==='Rentaro')return Promise.resolve(root.accept_party_invite(from))
+     .catch(()=>{});
+   if(typeof previous==='function')return previous(from);
+  };
+ }
+ try{
+  status.phase='BOOTSTRAP';
+  // Old V3 expected-build lease belongs to a superseded code release.
+  // Remove only that single key, not all user storage or CODE slots.
+  try{root.localStorage?.removeItem('Pogi_V3_Expected_Build_v1');}catch{}
+  const result=await bootstrapCharacterFromAdventureLand({
+   root,character:role,frameId:'order66direct_'+role+'_'+Number(now()),
+   activationMode:'development',requireCompleteRole:false,
+   config:{nativeRouteMode:true},
+   // No CoreSupervisor timer, no automatic recovery or browser restarts.
+   bootstrapOptions:{supervisorTimer:{
+    setIntervalFn:()=>0,clearIntervalFn:()=>{}
+   }}
+  });
+  if(!result?.ok||!result.runtime?.scheduler)throw Error(
+   String(result?.error||'DIRECT_RUNTIME_NOT_CREATED')+
+   (result?.activation?.failures?':'+result.activation.failures.join(','):'')+
+   (result?.roleBuild?.errors?':'+JSON.stringify(result.roleBuild.errors):''));
+  status.phase='SCHEDULER';
+  const scheduler=result.runtime.scheduler;
+  scheduler.start();
+  if(scheduler.status()?.running!==true)throw Error('DIRECT_SCHEDULER_NOT_RUNNING');
+  status.starting=false;status.active=true;status.phase='RUNNING';
+  status.runtime={state:result.runtime.stateCoordinator?.status()?.current||'IDLE',
+   missingOptional:result.roleBuild?.missing_optional||[]};
+  root.__POGI_V3_DIRECT_RUNTIME=result.runtime;
+  if(role==='Rentaro'&&typeof root.send_party_invite==='function'){
+   const active=typeof root.get_active_characters==='function'
+     ?root.get_active_characters()||{}:{};
+   for(const name of ['Souji','Hibari','Harutora'])
+    if(Object.prototype.hasOwnProperty.call(active,name))
+      void Promise.resolve(root.send_party_invite(name)).catch(()=>{});
+  }
+  try{root.game_log?.('O66 V3 '+role+' gameplay running');}catch{}
+  return{ok:true,role,status};
+ }catch(error){
+  status.starting=false;status.active=false;status.phase='FAILED';
+  status.error=String(error?.message||error);
+  try{root.game_log?.('O66 V3 '+role+' failed: '+status.error);}catch{}
+  return{ok:false,role,error:status.error,status};
+ }
+}
+module.exports={launchOrder66Direct};
+
+},{"./LiveBootstrap":"bootstrap/LiveBootstrap.js","../characters/priest/PriestHealingHeartbeat":"characters/priest/PriestHealingHeartbeat.js"}],
+"bootstrap/P1SupervisedTickGate.js":[function(require,module,exports){
+'use strict';
+// P1 only: mandatory supervised fighter gameplay gate. Pure read-only check.
+// Must not accept a self-labelled admission: Bridge/First State supplies an
+// independently validated verifier for the exact active session. No verifier
+// means HOLD. Never moves, revives, starts CODE, fights, or restarts a frame.
+const ROLES=new Set(['Souji','Hibari','Harutora']);
+const HEX=/^[a-f0-9]{40}$/;
+const SESSION=/^[A-Za-z0-9_-]{12,80}$/;
+function createP1SupervisedTickGate({
+  root,role,now=Date.now,verifyAdmission=null,maxAgeMs=3000
+}={}){
+  if(!ROLES.has(role))throw Error('P1_SUPERVISED_FIGHTER_REQUIRED');
+  if(!root||typeof root!=='object')throw Error('P1_SUPERVISED_ROOT_REQUIRED');
+  if(!Number.isFinite(maxAgeMs)||maxAgeMs<250||maxAgeMs>10000)throw Error('P1_SUPERVISED_FRESHNESS_INVALID');
+  const hold=(reason)=>Object.freeze({allow:false,reason,progress:false,hasSideEffects:false});
+  function check(){
+    // The game's live frame must be valid before considering stored permits.
+    const c=root.character;
+    if(!c||c.name!==role)return hold('P1_ROLE_FRAME_MISSING');
+    if(c.rip===true||typeof c.hp!=='number'||!Number.isFinite(c.hp)||c.hp<=0)
+      return hold('P1_ZERO_HP_OR_RIP');
+    if(root.socket?.connected!==true)return hold('P1_SOCKET_NOT_CONNECTED');
+    const maxHp=c.max_hp;
+    if(typeof maxHp!=='number'||!Number.isFinite(maxHp)||maxHp<=0||
+      c.hp>maxHp||c.hp/maxHp<0.75)return hold('P1_HP_SAFETY_THRESHOLD_NOT_MET');
+    if(c.map!=='halloween')return hold('P1_NOT_ON_APPROVED_FARM_MAP');
+    const x=c.real_x??c.x,y=c.real_y??c.y;
+    if(typeof x!=='number'||!Number.isFinite(x)||
+      typeof y!=='number'||!Number.isFinite(y))return hold('P1_POSITION_NOT_NUMERIC');
+    if(Math.hypot(x+495.5,y-685.5)>120)
+      return hold('P1_NOT_AT_ATTESTED_XSCORPION_FARM');
+    // A valid role's location alone does not grant any activity.
+    if(typeof verifyAdmission!=='function')return hold('P1_INDEPENDENT_ADMISSION_VERIFIER_REQUIRED');
+    const status=root.__POGI_V3_LOADER_STATUS;
+    const ticket=root.__POGI_V3_SUPERVISED_APPROVAL;
+    if(!status||status.role!==role||status.activationMode!=='supervised'||
+      status.ok!==true||status.installed!==true||status.gameplayStarted!==true)
+      return hold('P1_PINNED_SUPERVISED_LOADER_UNVERIFIED');
+    const session=String(ticket?.sessionId||'');
+    const sourceCommit=String(status.sourceCommit||'');
+    const releaseCommit=String(status.releaseCommit||'');
+    if(!SESSION.test(session)||!HEX.test(sourceCommit)||!HEX.test(releaseCommit)||
+      ticket.character!==role||ticket.userPresent!==true||ticket.singleTab!==true||
+      ticket.noRecovery!==true||ticket.sourceCommit!==sourceCommit||
+      ticket.releaseCommit!==releaseCommit)
+      return hold('P1_EXACT_SESSION_PINS_REQUIRED');
+    const sample={
+      sessionId:session,sourceCommit,releaseCommit,role,map:'halloween',
+      x,y,hp:c.hp,maxHp,
+      source:'V3_SUPERVISED_LIVE_FRAME',
+      observedAt:Number(now())
+    };
+    // The independent approval must attest current full-party safety and
+    // route completion, not merely repeat this read-only frame object.
+    let admission=null;
+    try{admission=verifyAdmission(Object.freeze(sample));}catch(_){admission=null;}
+    const t=Number(now());
+    // Refuse a Boolean, a Promise, an expired record, or a self-asserted
+    // approved flag without a complete role/session/boss/route attestation.
+    const approved=admission&&typeof admission==='object'&&
+      typeof admission.then!=='function'&&
+      admission.source==='P1_BRIDGE_FARM_ADMISSION'&&
+      admission.verified===true&&
+      SESSION.test(admission.handoffId||'')&&
+      admission.sessionId===session&&
+      admission.sourceCommit===sourceCommit&&
+      admission.releaseCommit===releaseCommit&&
+      admission.role===role&&
+      admission.routeVerified===true&&
+      admission.stagingSafe===true&&
+      admission.bossClear===true&&
+      admission.singleTab===true&&
+      Array.isArray(admission.partyRoles)&&
+      admission.partyRoles.length===3&&
+      ['Souji','Hibari','Harutora'].every(r=>admission.partyRoles.includes(r))&&
+      Number.isSafeInteger(admission.observedAt)&&
+      Number.isSafeInteger(admission.expiresAt)&&
+      admission.observedAt<=t&&
+      t-admission.observedAt<=maxAgeMs&&
+      admission.expiresAt>=t&&
+      admission.expiresAt<=t+maxAgeMs;
+    // The verifier must not change frame position, health, socket, pins, or
+    // loader while deciding; if it does, deny this tick and re-observe.
+    const sameFrame=c===root.character&&root.socket?.connected===true&&
+      c.rip!==true&&c.map==='halloween'&&
+      (c.real_x??c.x)===x&&(c.real_y??c.y)===y&&c.hp===sample.hp&&
+      c.max_hp===sample.maxHp&&
+      root.__POGI_V3_LOADER_STATUS===status&&
+      root.__POGI_V3_SUPERVISED_APPROVAL===ticket&&
+      status.role===role&&status.activationMode==='supervised'&&
+      status.ok===true&&status.installed===true&&
+      status.gameplayStarted===true&&status.sourceCommit===sourceCommit&&
+      status.releaseCommit===releaseCommit&&
+      ticket.sessionId===session&&ticket.character===role&&
+      ticket.userPresent===true&&ticket.singleTab===true&&
+      ticket.noRecovery===true&&ticket.sourceCommit===sourceCommit&&
+      ticket.releaseCommit===releaseCommit;
+    return approved&&sameFrame?Object.freeze({allow:true,reason:'P1_INDEPENDENT_FARM_ADMISSION',progress:false,hasSideEffects:false}):
+      hold('P1_FRESH_PARTY_FARM_ADMISSION_REQUIRED');
+  }
+  return Object.freeze({check});
+}
+module.exports={createP1SupervisedTickGate};
+
+},{}],
+"bootstrap/StateHandlers.js":[function(require,module,exports){
+'use strict';
+
+function createBankHandler(bank){
+  if(!bank)return null;
+  return{
+    start:async()=>typeof bank.begin==='function'?bank.begin():({ok:true}),
+    pause:async()=>({ok:true}),
+    resume:async()=>({ok:true}),
+    stop:async()=>({ok:true}),
+    health:async()=>{
+      const status=bank.getStatus();
+      return{ok:!status.session.lastError,status};
+    },
+    snapshot:async()=>bank.getStatus().session,
+    restore:async value=>bank.restore(value),
+    run:async()=>{
+      const runner=typeof bank.runStep==='function'?bank.runStep.bind(bank):bank.run.bind(bank);
+      const out=await runner();
+      return{
+        ok:true,
+        progress:out.advanced!==false,
+        kind:'BANK_PROGRESS',
+        complete:out.status==='COMPLETE',
+        reason:out.status==='COMPLETE'?'BANK_COMPLETE':'BANK_PROGRESS',
+        result:out
+      };
+    }
+  };
+}
+
+function createStandHandler(stand,shop,{now=Date.now,minIntervalMs=5000}={}){
+  if(!stand)return null;
+  let lastShopRunAt=null;
+  return{
+    start:async meta=>stand.start(meta),
+    pause:async meta=>stand.pause(meta),
+    resume:async meta=>{
+      const resumed=await stand.resume(meta);
+      if(resumed&&resumed.ok===false)return resumed;
+      return stand.start(meta);
+    },
+    stop:async meta=>stand.stop(meta),
+    health:async()=>{
+      const standHealth=await stand.health();
+      const shopHealth=shop&&typeof shop.health==='function'?await shop.health():null;
+      return{ok:standHealth&&standHealth.ok!==false&&(!shopHealth||shopHealth.ok!==false),stand:standHealth,shop:shopHealth};
+    },
+    snapshot:async()=>stand.snapshot(),
+    restore:async value=>stand.restore(value),
+    recover:async saved=>{
+      if(!saved||saved.paused===true||saved.phase==='PAUSED')return{ok:true,deferred:true,reason:'STAND_WAS_PAUSED'};
+      if(saved.phase==='OPEN')return stand.start({reason:'RECOVERY_REOPEN'});
+      if(saved.phase==='CLOSED')return stand.stop({reason:'RECOVERY_KEEP_CLOSED'});
+      return{ok:true,deferred:true,reason:'STAND_RECOVERY_NO_PHYSICAL_CHANGE'};
+    },
+    run:async()=>{
+      if(!shop||typeof shop.execute!=='function')return{ok:true,progress:false,kind:'STAND_IDLE',reason:'SHOP_NOT_ATTACHED'};
+      const ts=Number(now());
+      if(lastShopRunAt!=null&&ts-lastShopRunAt<Math.max(0,Number(minIntervalMs)||0)){
+        return{ok:true,progress:false,kind:'SHOP_STAND_THROTTLED',reason:'SHOP_STAND_THROTTLED'};
+      }
+      lastShopRunAt=ts;
+      const out=await shop.execute({refresh:true});
+      const r=out&&out.results||{};
+      const actions=[...(r.cancelled||[]),...(r.external||[]),...(r.offers||[]),...(r.sales||[])];
+      const successful=actions.filter(x=>x&&x.ok===true);
+      const bankPull=Array.isArray(r.bankPull)?r.bankPull:[];
+      const cleanIdleScan=!!(out&&out.ok!==false)&&actions.length===0&&bankPull.length===0;
+      const progress=successful.length>0||cleanIdleScan;
+      const reason=successful.length>0?'SHOP_STAND_PROGRESS':cleanIdleScan?'SHOP_STAND_SCAN_PROOF':'SHOP_STAND_IDLE';
+      return{ok:out&&out.ok!==false,progress,kind:cleanIdleScan?'SHOP_STAND_SCAN_PROOF':'SHOP_STAND_TICK',complete:false,reason,result:out};
+    }
+  };
+}
+
+function createDefaultStateHandlers(services={}){
+  const handlers={};
+  if(services.Farm)handlers.FARM=services.Farm;
+  if(services.WorldBoss&&typeof services.WorldBoss.tick==='function')handlers.WORLD_BOSS=services.WorldBoss;
+  if(services.Stand)handlers.STAND=createStandHandler(services.Stand,services.Shop);
+  if(services.Bank)handlers.BANK=createBankHandler(services.Bank);
+  if(services.GearProduction&&typeof services.GearProduction.executionReady==='function'&&services.GearProduction.executionReady()===true)handlers.GEAR_PRODUCTION=services.GearProduction;
+  return handlers;
+}
+
+module.exports={createBankHandler,createStandHandler,createDefaultStateHandlers};
+
+},{}],
+"characters/mage/MageController.js":[function(require,module,exports){
+'use strict';
+
+const {planMageManaAction,planSpawnClaimZap}=require('./Spells');
+
+function createMageController({party,character='Harutora'}={}){
+  if(!party||typeof party.ready!=='function')throw new Error('MAGE_PARTY_SERVICE_REQUIRED');
+  const name=String(character||'Harutora');
+
+  function plan(ctx={}){
+    const ready=party.ready(['Hibari','Souji'],{anchor:name,maxDistance:190});
+    if(!ready.ok)return{ok:true,action:null,reason:'PARTY_NOT_READY',details:ready};
+
+    if(ctx.spawnClaim===true){
+      const action=planSpawnClaimZap({...ctx,mageCombatReady:true});
+      return{ok:true,action:action.eligible?action:null,planner:action,reason:action.eligible?'SPAWN_CLAIM':'SPAWN_CLAIM_BLOCKED'};
+    }
+
+    const action=planMageManaAction({...ctx,mageCombatReady:true});
+    return{ok:true,action:action.eligible?action.selected:null,planner:action,reason:action.phase};
+  }
+
+  async function health(){
+    const ready=party.ready(['Hibari','Souji'],{anchor:name,maxDistance:190});
+    return{ok:true,combat_ready:ready.ok,details:ready};
+  }
+
+  return{plan,health};
+}
+
+module.exports={createMageController};
+
+},{"./Spells":"characters/mage/Spells.js"}],
+"characters/mage/Spells.js":[function(require,module,exports){
+'use strict';
+
+const {SKILLS}=require('../../core/contracts/AdventureLandContract');
+
+const MAGE_SPELLS=Object.freeze({
+  BLINK:Object.freeze({skill:'blink',category:'UTILITY_HIGH',owner:'MAGE_SPELL_STATE',requiresActionOwner:'ROUTE',...SKILLS.blink,successProof:'SERVER_RESPONSE_AND_POSITION'}),
+  MAGIPORT:Object.freeze({skill:'magiport',category:'UTILITY_HIGH',owner:'MAGE_SPELL_STATE',requiresActionOwner:'ROUTE',...SKILLS.magiport,successProof:'SERVER_RESPONSE_AND_TARGET_ARRIVAL'}),
+  BURST:Object.freeze({skill:'burst',category:'ATTACK_FINISHER',owner:'MAGE_SPELL_STATE',...SKILLS.burst,successProof:'SERVER_RESPONSE'}),
+  CBURST:Object.freeze({skill:'cburst',category:'ATTACK',owner:'MAGE_SPELL_STATE',...SKILLS.cburst,successProof:'SERVER_RESPONSE'}),
+  ENERGIZE:Object.freeze({skill:'energize',category:'SUSTAIN',owner:'MAGE_SPELL_STATE',...SKILLS.energize,successProof:'SERVER_RESPONSE'}),
+  REFLECTION:Object.freeze({skill:'reflection',category:'UTILITY_HIGH',owner:'MAGE_SPELL_STATE',...SKILLS.reflection,successProof:'SERVER_RESPONSE'}),
+  ZAPPER:Object.freeze({skill:'zapperzap',category:'ATTACK',owner:'MAGE_SPELL_STATE',equipmentRequirement:'ZAPPER_RING',...SKILLS.zapperzap,successProof:'SERVER_RESPONSE'})
+});
+function blocked(spell,reason,extra={}){return{eligible:false,reason,owner:spell.owner,skill:spell.skill,...extra};}
+function request(spell,payload,extra={}){return{eligible:true,reason:'READY',owner:spell.owner,category:spell.category,skill:spell.skill,successProof:spell.successProof,payload,...extra};}
+function baseChecks(spell,{cooldownReady=false,mp=0,level=Infinity}={}){
+  if(Number(level)<Number(spell.level||0))return blocked(spell,'LEVEL',{minimumLevel:spell.level});
+  if(!cooldownReady)return blocked(spell,'COOLDOWN');
+  if(Number.isFinite(Number(spell.mp))&&Number(mp)<Number(spell.mp))return blocked(spell,'MP',{requiredMp:spell.mp});
+  return null;
+}
+function planBlink({x,y,mp=0,cooldownReady=false,level=Infinity,authorizedByRoute=false}={}){
+  const s=MAGE_SPELLS.BLINK; const base=baseChecks(s,{cooldownReady,mp,level});if(base)return base;
+  if(authorizedByRoute!==true)return blocked(s,'ROUTE_OWNER_REQUIRED');
+  if(!Number.isFinite(Number(x))||!Number.isFinite(Number(y)))return blocked(s,'COORDINATES_INVALID');
+  return request(s,{kind:'USE_SKILL',name:'blink',target:[Number(x),Number(y)]},{actionOwner:'ROUTE'});
+}
+function planMagiport({target,mp=0,cooldownReady=true,level=Infinity,authorizedByRoute=false,consentExpected=true}={}){
+  const s=MAGE_SPELLS.MAGIPORT; const base=baseChecks(s,{cooldownReady,mp,level});if(base)return base;
+  if(authorizedByRoute!==true)return blocked(s,'ROUTE_OWNER_REQUIRED');
+  target=String(target||''); if(!target)return blocked(s,'TARGET_REQUIRED');
+  if(s.requiresPveConsent&&consentExpected!==true)return blocked(s,'TARGET_CONSENT_REQUIRED');
+  return request(s,{kind:'USE_SKILL',name:'magiport',target},{actionOwner:'ROUTE',requiresConsent:s.requiresPveConsent});
+}
+function planReflection({
+  target,
+  mp=0,
+  cooldownReady=false,
+  level=Infinity,
+  inRange=false,
+  threatDamageType='',
+  threatHasMagicalAbility=false,
+  defensivePvp=false
+}={}){
+  const s=MAGE_SPELLS.REFLECTION; const base=baseChecks(s,{cooldownReady,mp,level});if(base)return base;
+  target=String(target||''); if(!target)return blocked(s,'TARGET_REQUIRED');
+
+  const damageType=String(threatDamageType||'').toLowerCase();
+  const magicalThreat=
+    damageType==='magical' ||
+    threatHasMagicalAbility===true;
+
+  // Official server combat reflects only attacks whose defense path is
+  // resistance (magical). Physical-only and pure PvE threats waste the cast.
+  // Defensive PVP retains its independent emergency exception.
+  if(defensivePvp!==true&&!magicalThreat){
+    if(damageType==='physical')return blocked(s,'PHYSICAL_ONLY_THREAT');
+    if(damageType==='pure')return blocked(s,'PURE_DAMAGE_THREAT');
+    return blocked(s,'MAGICAL_THREAT_REQUIRED');
+  }
+
+  if(inRange!==true)return blocked(s,'RANGE');
+  return request(s,{kind:'USE_SKILL',name:'reflection',target},{
+    reflectionPolicy:'MAGICAL_OR_MIXED_MAGICAL_PVE',
+    defensivePvp:defensivePvp===true,
+    threatDamageType:damageType||null,
+    threatHasMagicalAbility:threatHasMagicalAbility===true
+  });
+}
+function planEnergize({target,amount,mp=0,cooldownReady=false,level=Infinity,inRange=false}={}){
+  const s=MAGE_SPELLS.ENERGIZE; const base=baseChecks(s,{cooldownReady,mp,level});if(base)return base;
+  target=String(target||''); amount=Number(amount);
+  if(!target)return blocked(s,'TARGET_REQUIRED');
+  if(inRange!==true)return blocked(s,'RANGE');
+  if(!Number.isFinite(amount)||amount<=0)return blocked(s,'ENERGIZE_AMOUNT_INVALID');
+  if(Number(mp)<amount)return blocked(s,'MP',{requiredMp:amount});
+  return request(s,{kind:'USE_SKILL',name:'energize',target,extraArg:amount});
+}
+function planCBurst({targets=[],mp=0,cooldownReady=false,level=Infinity,mageCombatReady=false}={}){
+  const s=MAGE_SPELLS.CBURST;
+  if(mageCombatReady!==true)return blocked(s,'MAGE_PARTY_NOT_READY');
+  const base=baseChecks(s,{cooldownReady,mp,level});if(base)return base;
+  if(!Array.isArray(targets)||!targets.length)return blocked(s,'NO_TARGETS');
+  const allocations=[]; let total=0;
+  for(const row of targets){
+    const id=String(row&&row.id||''); const amount=Number(row&&row.mp);
+    if(!id||!Number.isFinite(amount)||amount<=0)return blocked(s,'TARGET_ALLOCATION_INVALID');
+    if(row.inRange!==true)return blocked(s,'TARGET_OUT_OF_RANGE',{target:id});
+    total+=amount; allocations.push([id,amount]);
+  }
+  const totalCost=total+Number(s.mp||0);
+  if(totalCost>Number(mp))return blocked(s,'MP_ALLOCATION_EXCEEDS_AVAILABLE',{allocatedMp:total,totalMpCost:totalCost});
+  return request(s,{kind:'USE_SKILL',name:'cburst',target:allocations},{allocatedMp:total,totalMpCost:totalCost,explicitTargets:true,rangeProofRequired:true});
+}
+
+const MAGE_MANA_POLICY=Object.freeze({
+  autoSecuredManaBurst:true,
+  manaBurstPriority:'BEFORE_CBURST',
+  farmReserveMp:2400,
+  bossAssemblyReserveMp:4000,
+  bossCombatReserveMp:2400,
+  farmStartRatio:0.78,
+  farmMinSelectedMp:500,
+  farmMaxSelectedMp:800,
+  bossStartRatio:0.72,
+  bossUncursedStartRatio:0.90,
+  bossMinSelectedMp:700,
+  bossMaxSelectedMp:900,
+  bossCursedMinSelectedMp:800,
+  bossCursedMaxSelectedMp:1200,
+  minKillSelectedMp:100,
+  lowRoll:0.90,
+  cburstKillCushion:1.03,
+  manaBurstSafety:0.95
+});
+
+function planDynamicCBurst({
+  target,
+  targetHp=0,
+  mp=0,
+  maxMp=0,
+  cooldownReady=false,
+  level=Infinity,
+  inRange=false,
+  isBoss=false,
+  targetCursed=false,
+  warriorHasAggro=false,
+  partyAssembled=true,
+  magicalDamageMultiplier=1,
+  incomingDamageAmp=1,
+  mageCombatReady=false,
+  warriorCanTauntTarget=false
+}={}){
+  const s=MAGE_SPELLS.CBURST;
+  if(mageCombatReady!==true)return blocked(s,'MAGE_PARTY_NOT_READY');
+  const base=baseChecks(s,{cooldownReady,mp,level});
+  if(base)return base;
+
+  target=String(target||'');
+  if(!target)return blocked(s,'TARGET_REQUIRED');
+  if(inRange!==true)return blocked(s,'RANGE');
+
+  if(isBoss!==true&&warriorCanTauntTarget!==true){
+    return blocked(s,'TARGET_OUTSIDE_WARRIOR_TAUNT_SAFE_RANGE');
+  }
+
+  if(isBoss===true){
+    if(partyAssembled!==true)return blocked(s,'BOSS_ASSEMBLY_REQUIRED',{reserveMp:MAGE_MANA_POLICY.bossAssemblyReserveMp});
+  }
+
+  const reserve=isBoss===true
+    ? MAGE_MANA_POLICY.bossCombatReserveMp
+    : MAGE_MANA_POLICY.farmReserveMp;
+  const baseCost=Number(s.mp||0);
+  const surplus=Math.floor(Number(mp)-reserve-baseCost);
+  if(surplus<MAGE_MANA_POLICY.minKillSelectedMp){
+    return blocked(s,'MANA_RESERVE',{reserveMp:reserve,availableSelectedMp:Math.max(0,surplus)});
+  }
+
+  const profile=isBoss===true
+    ? (targetCursed===true
+      ? {
+          startRatio:MAGE_MANA_POLICY.bossStartRatio,
+          minSelected:MAGE_MANA_POLICY.bossCursedMinSelectedMp,
+          maxSelected:MAGE_MANA_POLICY.bossCursedMaxSelectedMp
+        }
+      : {
+          startRatio:MAGE_MANA_POLICY.bossUncursedStartRatio,
+          minSelected:MAGE_MANA_POLICY.bossMinSelectedMp,
+          maxSelected:MAGE_MANA_POLICY.bossMaxSelectedMp
+        })
+    : {
+        startRatio:MAGE_MANA_POLICY.farmStartRatio,
+        minSelected:MAGE_MANA_POLICY.farmMinSelectedMp,
+        maxSelected:MAGE_MANA_POLICY.farmMaxSelectedMp
+      };
+
+  const ratio=Math.max(0.0001,Number(s.ratio||0.5));
+  const defenseMult=Math.max(0.05,Number(magicalDamageMultiplier)||1);
+  const amp=Math.max(0.01,Number(incomingDamageAmp)||1);
+  const perMp=ratio*MAGE_MANA_POLICY.lowRoll*defenseMult*amp;
+  const hp=Math.max(0,Number(targetHp)||0);
+  const killMp=hp>0
+    ? Math.ceil((hp/perMp)*MAGE_MANA_POLICY.cburstKillCushion)
+    : 0;
+  const exactKill=
+    killMp>=MAGE_MANA_POLICY.minKillSelectedMp &&
+    killMp<=profile.maxSelected &&
+    killMp<=surplus;
+
+  let selectedMp=0;
+  let allocationMode='HEALTHY_CHUNK';
+
+  if(exactKill){
+    selectedMp=killMp;
+    allocationMode='EXACT_LOW_ROLL_KILL';
+  }else{
+    const ratioNow=Number(maxMp)>0?Number(mp)/Number(maxMp):0;
+    if(ratioNow<profile.startRatio){
+      return blocked(s,'WAIT_FOR_SURPLUS',{startRatio:profile.startRatio,currentRatio:ratioNow,reserveMp:reserve});
+    }
+    if(surplus<profile.minSelected){
+      return blocked(s,'MANA_RESERVE',{reserveMp:reserve,requiredSelectedMp:profile.minSelected,availableSelectedMp:surplus});
+    }
+    selectedMp=Math.min(profile.maxSelected,surplus);
+  }
+
+  const planned=planCBurst({
+    targets:[{id:target,mp:selectedMp,inRange:true}],
+    mp:Number(mp),
+    cooldownReady:true,
+    level,
+    mageCombatReady:true
+  });
+  if(!planned.eligible)return planned;
+
+  return{
+    ...planned,
+    profile:'DYNAMIC_V7',
+    allocationMode,
+    selectedMp,
+    reserveMp:reserve,
+    isBoss:isBoss===true,
+    targetCursed:targetCursed===true,
+    warriorAggroRequired:false,
+    lowRoll:MAGE_MANA_POLICY.lowRoll
+  };
+}
+
+function planManaBurst({
+  target,
+  targetHp=0,
+  mp=0,
+  cooldownReady=false,
+  inRange=false,
+  isBoss=false,
+  warriorHasAggro=false,
+  otherThreatsOnMage=false,
+  incomingDamageAmp=1,
+  mageCombatReady=false
+}={}){
+  const s=MAGE_SPELLS.BURST;
+  if(mageCombatReady!==true)return blocked(s,'MAGE_PARTY_NOT_READY');
+  const base=baseChecks(s,{cooldownReady,mp,level:Infinity});
+  if(base)return base;
+
+  target=String(target||'');
+  if(!target)return blocked(s,'TARGET_REQUIRED');
+  if(isBoss!==true)return blocked(s,'BOSS_FINISHER_ONLY');
+  if(otherThreatsOnMage===true)return blocked(s,'MAGE_UNDER_EXTRA_THREAT');
+  if(inRange!==true)return blocked(s,'RANGE');
+  if(Number(mp)<MAGE_MANA_POLICY.bossCombatReserveMp){
+    return blocked(s,'MANA_RESERVE',{reserveMp:MAGE_MANA_POLICY.bossCombatReserveMp});
+  }
+
+  const amp=Math.max(0.01,Number(incomingDamageAmp)||1);
+  const lowRollDamage=
+    Number(mp)*
+    Number(s.ratio||0.555)*
+    MAGE_MANA_POLICY.lowRoll*
+    amp;
+  const securedHp=lowRollDamage*MAGE_MANA_POLICY.manaBurstSafety;
+
+  if(Number(targetHp)>securedHp){
+    return blocked(s,'NOT_SECURED_FINISHER',{securedHp,lowRollDamage});
+  }
+
+  return request(s,{kind:'USE_SKILL',name:'burst',target},{
+    profile:'DYNAMIC_V7',
+    policy:'WORLD_BOSS_PARTY_READY_FINISHER',
+    consumesEntireCurrentMp:true,
+    lowRollDamage,
+    securedHp,
+    safety:MAGE_MANA_POLICY.manaBurstSafety
+  });
+}
+
+
+function planMageManaAction(input={}){
+  if(input.mageCombatReady!==true){
+    return{eligible:false,phase:'MAGE_PARTY_BLOCKED',priority:MAGE_MANA_POLICY.manaBurstPriority,reason:'MAGE_PARTY_NOT_READY'};
+  }
+  // Secured Mana Burst gets first look on bosses. This mirrors the intended
+  // combat order without sharing V2 runtime code.
+  if(MAGE_MANA_POLICY.autoSecuredManaBurst===true){
+    const burst=planManaBurst({
+      target:input.target,
+      targetHp:Number(input.targetHp||0),
+      mp:Number(input.mp||0),
+      cooldownReady:input.burstCooldownReady===true,
+      inRange:input.burstInRange===true,
+      isBoss:input.isBoss===true,
+      warriorHasAggro:input.warriorHasAggro===true,
+      otherThreatsOnMage:input.otherThreatsOnMage===true,
+      incomingDamageAmp:Number(input.incomingDamageAmp||1),
+      mageCombatReady:true
+    });
+
+    if(burst.eligible){
+      return{
+        eligible:true,
+        phase:'SECURED_MANA_BURST_FINISHER',
+        priority:MAGE_MANA_POLICY.manaBurstPriority,
+        selected:burst
+      };
+    }
+  }
+
+  const cburst=planDynamicCBurst({
+    target:input.target,
+    targetHp:Number(input.targetHp||0),
+    mp:Number(input.mp||0),
+    maxMp:Number(input.maxMp||0),
+    cooldownReady:input.cburstCooldownReady===true,
+    level:Number.isFinite(Number(input.level))?Number(input.level):Infinity,
+    inRange:input.cburstInRange===true,
+    isBoss:input.isBoss===true,
+    targetCursed:input.targetCursed===true,
+    warriorHasAggro:input.warriorHasAggro===true,
+    partyAssembled:input.partyAssembled!==false,
+    magicalDamageMultiplier:Number(input.magicalDamageMultiplier||1),
+    incomingDamageAmp:Number(input.incomingDamageAmp||1),
+    mageCombatReady:true,
+    warriorCanTauntTarget:input.warriorCanTauntTarget===true
+  });
+
+  if(cburst.eligible){
+    return{
+      eligible:true,
+      phase:'DYNAMIC_CBURST',
+      priority:MAGE_MANA_POLICY.manaBurstPriority,
+      selected:cburst
+    };
+  }
+
+  return{
+    eligible:false,
+    phase:'NO_MANA_ATTACK',
+    priority:MAGE_MANA_POLICY.manaBurstPriority,
+    burstReason:MAGE_MANA_POLICY.autoSecuredManaBurst===true
+      ? planManaBurst({
+          target:input.target,
+          targetHp:Number(input.targetHp||0),
+          mp:Number(input.mp||0),
+          cooldownReady:input.burstCooldownReady===true,
+          inRange:input.burstInRange===true,
+          isBoss:input.isBoss===true,
+          warriorHasAggro:input.warriorHasAggro===true,
+          otherThreatsOnMage:input.otherThreatsOnMage===true,
+          incomingDamageAmp:Number(input.incomingDamageAmp||1),
+          mageCombatReady:true
+        }).reason
+      : 'AUTO_BURST_DISABLED',
+    cburstReason:cburst.reason
+  };
+}
+
+function planSpawnClaimZap({
+  target,
+  mp=0,
+  cooldownReady=false,
+  inRange=false,
+  zapperEquipped=false,
+  targetIsMonster=true,
+  cooperative=false,
+  targetUnowned=false,
+  claimAuthorized=false,
+  observedOnEntitiesPacket=false,
+  mageCombatReady=false,
+  warriorCanTauntTarget=false,
+  antiKsArmed=false,
+  bossPriorityActive=false,
+  targetIsBoss=false
+}={}){
+  const spell=MAGE_SPELLS.ZAPPER;
+  if(targetIsBoss===true)return blocked(spell,'WORLD_BOSS_ZAP_DISABLED');
+  if(bossPriorityActive===true)return blocked(spell,'BOSS_200_PRIORITY_ACTIVE');
+  if(mageCombatReady!==true)return blocked(spell,'MAGE_PARTY_NOT_READY');
+  if(antiKsArmed!==true)return blocked(spell,'ANTI_KS_NOT_ARMED');
+  const base=baseChecks(spell,{cooldownReady,mp,level:Infinity});
+  if(base)return base;
+
+  target=String(target||'');
+  if(!target)return blocked(spell,'TARGET_REQUIRED');
+  if(targetIsMonster!==true)return blocked(spell,'MONSTER_TARGET_REQUIRED');
+  if(cooperative===true)return blocked(spell,'COOPERATIVE_TARGET_SHARED_REWARDS');
+  if(claimAuthorized!==true)return blocked(spell,'TARGET_CLAIM_AUTH_REQUIRED');
+  if(observedOnEntitiesPacket!==true)return blocked(spell,'ENTITIES_PACKET_PROOF_REQUIRED');
+  if(targetUnowned!==true)return blocked(spell,'UNOWNED_TARGET_REQUIRED');
+  if(warriorCanTauntTarget!==true)return blocked(spell,'TARGET_OUTSIDE_WARRIOR_TAUNT_SAFE_RANGE');
+  if(zapperEquipped!==true)return blocked(spell,'ZAPPER_PREARM_REQUIRED',{
+    equipmentRequirement:spell.equipmentRequirement
+  });
+  if(inRange!==true)return blocked(spell,'RANGE');
+
+  return request(spell,{kind:'USE_SKILL',name:'zapperzap',target},{
+    authorizationOwner:'TARGET_CLAIM',
+    purpose:'SPAWN_CLAIM',
+    firstHitClaim:true,
+    observedOnEntitiesPacket:true,
+    targetUnownedRequired:true,
+    warriorCanTauntTarget:true,
+    noRingSwap:true,
+    percentageManaReserve:false,
+    requiredMp:Number(spell.mp||0),
+    equipmentRequirement:spell.equipmentRequirement
+  });
+}
+
+function planZapperZap({
+  target,
+  mp=0,
+  maxMp=0,
+  mpReserveRatio=0.50,
+  cooldownReady=false,
+  inRange=false,
+  zapperEquipped=false,
+  canSwapZapper=false,
+  targetIsMonster=true,
+  foreignPartyAiming=false,
+  warriorHasAggro=false,
+  alreadyZapped=false,
+  cooperative=false,
+  mageCombatReady=false,
+  antiKsArmed=false,
+  bossPriorityActive=false,
+  targetIsBoss=false
+}={}){
+  const s=MAGE_SPELLS.ZAPPER;
+  if(targetIsBoss===true)return blocked(s,'WORLD_BOSS_ZAP_DISABLED');
+  if(bossPriorityActive===true)return blocked(s,'BOSS_200_PRIORITY_ACTIVE');
+  if(mageCombatReady!==true)return blocked(s,'MAGE_PARTY_NOT_READY');
+  if(antiKsArmed!==true)return blocked(s,'ANTI_KS_NOT_ARMED');
+  const base=baseChecks(s,{cooldownReady,mp,level:Infinity});
+  if(base)return base;
+
+  target=String(target||'');
+  if(!target)return blocked(s,'TARGET_REQUIRED');
+  if(targetIsMonster!==true)return blocked(s,'MONSTER_TARGET_REQUIRED');
+  if(cooperative===true)return blocked(s,'COOPERATIVE_TARGET_SHARED_REWARDS');
+  if(warriorHasAggro!==true)return blocked(s,'WARRIOR_AGGRO_REQUIRED');
+  if(foreignPartyAiming!==true)return blocked(s,'NO_FOREIGN_CONTEST');
+  if(alreadyZapped===true)return blocked(s,'ALREADY_ZAPPED_THIS_MONSTER');
+
+  const reserveRatio=Math.min(1,Math.max(0,Number(mpReserveRatio)||0));
+  const reserve=Math.max(Number(s.mp||0),Math.floor(Math.max(0,Number(maxMp||0))*reserveRatio));
+  if(Number(mp)-Number(s.mp||0)<reserve){
+    return blocked(s,'MANA_RESERVE',{reserveMp:reserve,reserveRatio});
+  }
+
+  if(zapperEquipped!==true&&canSwapZapper!==true)return blocked(s,'ZAPPER_RING_UNAVAILABLE',{equipmentRequirement:s.equipmentRequirement});
+  if(inRange!==true)return blocked(s,'RANGE');
+
+  return request(s,{kind:'USE_SKILL',name:'zapperzap',target},{
+    equipmentRequirement:s.equipmentRequirement,
+    contestedTargetOnly:true,
+    foreignExactTargetRequired:true,
+    warriorAggroRequired:true,
+    oneZapPerMonster:true,
+    reserveMp:reserve,
+    reserveRatio,
+    temporaryRingSwap:zapperEquipped!==true,
+    restoreDisplacedRing:zapperEquipped!==true
+  });
+}
+module.exports={MAGE_SPELLS,MAGE_MANA_POLICY,planBlink,planMagiport,planReflection,planEnergize,planCBurst,planDynamicCBurst,planManaBurst,planMageManaAction,planSpawnClaimZap,planZapperZap};
+
+},{"../../core/contracts/AdventureLandContract":"core/contracts/AdventureLandContract.js"}],
+"characters/merchant/MerchantController.js":[function(require,module,exports){
+'use strict';
+
+const {priority}=require('../../states/StateRegistry');
+
+function createMerchantController({inventory,gearHandoff=null,shop=null,character='Rentaro'}={}){
+  if(!inventory||typeof inventory.freeSlots!=='function')throw new Error('MERCHANT_INVENTORY_REQUIRED');
+  const name=String(character||'Rentaro');
+
+  async function choose(ctx={}){
+    const candidates=[];
+    if(ctx.emergency===true)candidates.push({state:'EMERGENCY',reason:'EMERGENCY'});
+    if(ctx.pvpDefense===true)candidates.push({state:'PVP_DEFENSE',reason:'PVP_DEFENSE'});
+    const halloween=String(ctx.halloweenEventBoss||ctx.eventBossMtype||'').toLowerCase();
+    const halloweenStand=['mrpumpkin','mrgreen'].includes(halloween) && ctx.eventBossLive!==false;
+    if(halloweenStand){
+      // In V3 WORLD_BOSS owns the route until the event ends. The mission
+      // executes a safe stand hold rather than a combat/merchant boss chase.
+      candidates.push({state:'WORLD_BOSS',reason:'HALLOWEEN_EVENT_STAND_HOLD',boss:halloween,
+        destination:{map:'main',x:-300,y:-100},openStand:true,
+        releaseWhen:'EVENT_DEFEATED',endGraceMs:3000});
+    }
+    if(ctx.worldBoss===true&&!halloweenStand)candidates.push({state:'WORLD_BOSS',reason:'WORLD_BOSS'});
+    if(ctx.event===true)candidates.push({state:'EVENT',reason:'EVENT'});
+
+    if(gearHandoff&&typeof gearHandoff.routingHint==='function'){
+      const hint=gearHandoff.routingHint();
+      if(hint&&hint.state==='BANK')candidates.push({state:'BANK',reason:hint.reason,workId:hint.workId||null});
+      if(hint&&hint.state==='GEAR_PRODUCTION')candidates.push({state:'GEAR_PRODUCTION',reason:hint.reason,workId:hint.workId||null});
+    }
+
+    if(shop&&typeof shop.routingHint==='function'){
+      if(typeof shop.plan==='function'){
+        try{await shop.plan();}catch(error){}
+      }
+      const hint=shop.routingHint();
+      if(hint&&hint.state==='BANK')candidates.push({state:'BANK',reason:hint.reason,shopPullCount:Number(hint.count||0)});
+    }
+
+    const free=await inventory.freeSlots();
+    const bankThreshold=Number(ctx.bankFreeSlotThreshold??4);
+    if(ctx.bankRequired===true||free<=bankThreshold)candidates.push({state:'BANK',reason:ctx.bankRequired===true?'BANK_REQUIRED':'INVENTORY_LOW',free_slots:free});
+    if(ctx.gearProductionReady===true)candidates.push({state:'GEAR_PRODUCTION',reason:'GEAR_WORK_AVAILABLE'});
+    if(ctx.standAllowed!==false)candidates.push({state:'STAND',reason:'IDLE_STAND'});
+    candidates.push({state:'IDLE',reason:'FALLBACK'});
+
+    candidates.sort((a,b)=>priority(b.state)-priority(a.state));
+    return{ok:true,character:name,selected:candidates[0],candidates};
+  }
+
+  async function health(){return{ok:true,free_slots:await inventory.freeSlots()};}
+  return{choose,health};
+}
+
+module.exports={createMerchantController};
+
+},{"../../states/StateRegistry":"states/StateRegistry.js"}],
+"characters/priest/PriestController.js":[function(require,module,exports){
+'use strict';
+
+// Farm fallback when Souji's independent healing heartbeat is unavailable.
+// Heal always comes before any attack or farm movement. Live skill readiness
+// overrides empty (not yet observed) CooldownService entries.
+function createPriestController({party,cooldowns,character='Souji',farDistance=50}={}){
+  if(!party||!cooldowns)throw new Error('PRIEST_SERVICES_REQUIRED');
+  const name=String(character||'Souji');
+  const finite=v=>typeof v==='number'&&Number.isFinite(v);
+  function ready(skill,ctx={}){
+    if(typeof ctx.skillReady==='function'){
+      const live=ctx.skillReady(skill);
+      if(live===true||live===false)return live;
+    }
+    return cooldowns.status(skill).ready===true;
+  }
+  function distance(a,b){
+    if(!a||!b||![a.x,a.y,b.x,b.y].every(finite))return Infinity;
+    return Math.hypot(a.x-b.x,a.y-b.y);
+  }
+  function plan(ctx={}){
+    const rows=party.status();
+    const live=rows.filter(m=>(m.online===true||
+      (m.rosterOnline===true&&m.healthFromPartyRoster===true))&&
+      m.dead!==true&&m.rip!==true&&
+      finite(m.hp)&&finite(m.max_hp)&&m.max_hp>0&&m.hp>0&&
+      (!finite(m.age_ms)||m.age_ms<=5000));
+    if(!live.length)return{ok:true,action:null,reason:'NO_LIVE_PARTY'};
+    const priest=live.find(m=>m.name===name);
+    const injured=live.filter(m=>m.hp/m.max_hp<1)
+      .sort((a,b)=>(a.hp/a.max_hp)-(b.hp/b.max_hp));
+    const multiLow=live.filter(m=>m.hp/m.max_hp<0.72).length>=2;
+    // A remote party member has no targetable entity, but their official
+    // party-roster HP can still request untargeted partyheal.
+    const farInjured=priest&&injured.find(m=>m.name!==name&&(
+      m.healthFromPartyRoster===true||
+      m.map!==priest.map||
+      String(m.instance||'')!==String(priest.instance||'')||
+      distance(priest,m)>=farDistance));
+    if((farInjured||multiLow)&&ready('partyheal',ctx)){
+      return{ok:true,action:{kind:'USE_SKILL',skill:'partyheal',owner:'PRIEST_COMBAT'},
+        reason:farInjured?'DISTANT_INJURED_PARTY_MEMBER':'MULTI_MEMBER_LOW'};
+    }
+    const lowest=injured.find(m=>m.name===name||(m.online===true&&
+      (!priest||(m.map===priest.map&&
+       String(m.instance||'')===String(priest.instance||'')))));
+    if(lowest&&ready('heal',ctx)){
+      return{ok:true,action:{kind:'USE_SKILL',skill:'heal',target:String(lowest.name),
+        owner:'PRIEST_COMBAT'},reason:'LOWEST_MEMBER'};
+    }
+    if(ctx.frankyMummyTarget&&ready('attack',ctx)){
+      return{ok:true,action:{kind:'ATTACK',target:String(ctx.frankyMummyTarget),
+        owner:'PRIEST_COMBAT'},reason:'FRANKY_MUMMY_PRIORITY'};
+    }
+    return{ok:true,action:null,reason:injured.length?'HEAL_SKILLS_NOT_READY':'PARTY_STABLE'};
+  }
+  async function health(){
+    const self=party.get(name);
+    if(!self)return{ok:true,ready:false,reason:'PARTY_SNAPSHOT_PENDING',self:null};
+    return{
+      ok:true,ready:self.online===true&&self.dead!==true&&self.rip!==true,
+      reason:self.online!==true?'OFFLINE':(self.dead===true||self.rip===true?'DEAD':'READY'),self
+    };
+  }
+  return{plan,health};
+}
+module.exports={createPriestController};
+
+},{}],
+"characters/priest/PriestHealingHeartbeat.js":[function(require,module,exports){
+'use strict';
+
+// Souji's independent, always-on healing lane. Starts before First State,
+// navigation, Farm, or World Boss and remains active across state changes.
+// Reads the live party on EVERY tick, including the first tick after party
+// join. Does not route movement, attack, or depend on Bridge receipts.
+const ROLES=new Set(['Souji','Hibari','Harutora','Rentaro']);
+function finite(x){return typeof x==='number'&&Number.isFinite(x);}
+function point(row){
+  if(!row)return null;
+  const x=row.real_x??row.x,y=row.real_y??row.y;
+  return finite(x)&&finite(y)?{x,y}:null;
+}
+function distance(a,b){
+  const x=point(a),y=point(b);
+  return x&&y?Math.hypot(x.x-y.x,x.y-y.y):Infinity;
+}
+function fraction(row){return finite(row?.hp)&&finite(row?.max_hp)&&row.max_hp>0?row.hp/row.max_hp:Infinity;}
+
+function createPriestHealingHeartbeat({
+  root,now=Date.now,intervalMs=350,
+  farDistance=50,healBelow=1,criticalBelow=0.72,
+  minRetryMs=750,failedRetryMs=1400,
+  setIntervalFn=setInterval,clearIntervalFn=clearInterval
+}={}){
+  if(!root||typeof root!=='object')throw Error('PRIEST_HEAL_FRAME_R
