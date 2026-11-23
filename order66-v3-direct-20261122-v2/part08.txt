@@ -1,0 +1,1527 @@
+ssoryType:null};
+  if(isCraftable(item,meta))return{category:'CRAFTABLES',reason:RecipeIntelligence.isIngredient(item.name)?'RECIPE_INGREDIENT':'CRAFTABLE',meta,accessoryType:null};
+  if(meta)return{category:'GENERAL',reason:'KNOWN_GENERAL',meta,accessoryType:null};
+  return{category:'OTHER',reason:'METADATA_UNKNOWN',meta:null,accessoryType:null};
+}
+function depositAllowed(item,options={}){
+  const decision=classifyItem(item,options);
+  return{ok:decision.deposit!==false,decision};
+}
+function destinationPacks(category){const row=BANK_LAYOUT[String(category||'').toUpperCase()];return row?[...row.packs]:[];}
+function layoutForPack(pack){
+  const target=String(pack||'');
+  for(const [category,row] of Object.entries(BANK_LAYOUT))if(row.packs.includes(target))return{category,...row};
+  return null;
+}
+function validateCanonicalLayout(){
+  const used=new Set();
+  for(const [category,row] of Object.entries(BANK_LAYOUT)){
+    for(const pack of row.packs){
+      if(!bankPackFloor(pack))throw new Error('BANK_LAYOUT_PACK_INVALID_'+category+'_'+pack);
+      if(used.has(pack))throw new Error('BANK_LAYOUT_PACK_OVERLAP_'+pack);
+      used.add(pack);
+    }
+  }
+  for(let i=0;i<=23;i++)if(!used.has('items'+i))throw new Error('BANK_LAYOUT_PACK_UNASSIGNED_items'+i);
+  if(BANK_PACK_SIZE!==42)throw new Error('BANK_LAYOUT_PACK_SIZE_UNEXPECTED');
+  return true;
+}
+validateCanonicalLayout();
+
+module.exports={BANK_LAYOUT,ACCESSORY_TYPES,ARMOR_TYPES,ACCESSORY_MAX_LEVELS,KNOWN_KEY_NAMES,metadataFor,accessoryType,classifyItem,depositAllowed,destinationPacks,layoutForPack,validateCanonicalLayout};
+
+},{"../../core/contracts/AdventureLandContract":"core/contracts/AdventureLandContract.js","../../core/policy/ExchangeApprovalPolicy":"core/policy/ExchangeApprovalPolicy.js","../exchange/ExchangePolicy":"organs/exchange/ExchangePolicy.js","../../ligaments/crafting/RecipeIntelligence":"ligaments/crafting/RecipeIntelligence.js"}],
+"organs/bank/BankNavigation.js":[function(require,module,exports){
+'use strict';
+
+const {bankPackFloor}=require('../../core/contracts/AdventureLandContract');
+const {BANK_LAYOUT,layoutForPack}=require('./BankLayoutPolicy');
+const {destination}=require('./BankDestinations');
+
+const FLOOR_LABELS=Object.freeze({
+  bank:'Main Bank',
+  bank_b:'Bank Basement',
+  bank_u:'Upper Bank'
+});
+
+const CATEGORY_ALIASES=Object.freeze({
+  EXCHANGE:'EXCHANGEABLES',
+  MATERIALS:'CRAFTABLES',
+  MISC:'OTHER',
+  HIGH_ACCESSORIES:'ACCESSORY_MAX',
+  MAX_ACCESSORIES:'ACCESSORY_MAX'
+});
+
+function clone(v){return v==null?v:JSON.parse(JSON.stringify(v));}
+function packNumber(pack){
+  const m=/^items(\d+)$/.exec(String(pack||''));
+  return m?Number(m[1]):null;
+}
+function normalizeCategory(value){
+  const raw=String(value||'').trim().toUpperCase().replace(/[\s-]+/g,'_');
+  return CATEGORY_ALIASES[raw]||raw;
+}
+function packDisplayName(pack){
+  const id=String(pack||'');
+  const row=layoutForPack(id);
+  const n=packNumber(id);
+  if(!row){
+    const floor=bankPackFloor(id);
+    if(!floor||n==null)return id||'Unknown pack';
+    return FLOOR_LABELS[floor]+' Pack '+(n+1);
+  }
+  const index=row.packs.indexOf(id);
+  if(row.packs.length===1)return row.label;
+  return row.label+' '+(index+1);
+}
+function packDescriptor(pack){
+  const id=String(pack||'');
+  const floor=bankPackFloor(id);
+  if(!floor)return{ok:false,error:'BANK_NAV_PACK_INVALID',pack:id||null};
+  const layout=layoutForPack(id);
+  return{
+    ok:true,
+    kind:'PACK',
+    pack:id,
+    packNumber:packNumber(id),
+    floor,
+    floorLabel:FLOOR_LABELS[floor]||floor,
+    category:layout&&layout.category||null,
+    categoryLabel:layout&&layout.label||null,
+    label:packDisplayName(id),
+    anchor:'pack-'+id,
+    depositAllowed:layout?layout.deposit!==false:null,
+    emergency:!!(layout&&layout.emergency)
+  };
+}
+function canonicalCategory(value){
+  const key=normalizeCategory(value);
+  if(BANK_LAYOUT[key])return key;
+
+  const d=destination(key);
+  if(d&&d.alias&&BANK_LAYOUT[d.alias])return d.alias;
+  if(d&&d.packs&&d.packs.length){
+    const rows=d.packs.map(layoutForPack).filter(Boolean);
+    const categories=[...new Set(rows.map(x=>x.category))];
+    if(categories.length===1)return categories[0];
+  }
+  return null;
+}
+function categoryDescriptor(category,{selectedPack=null,currentMap=null}={}){
+  const key=canonicalCategory(category);
+  if(!key)return{ok:false,error:'BANK_NAV_CATEGORY_UNKNOWN',category:String(category||'')||null};
+  const row=BANK_LAYOUT[key];
+  const packs=[...row.packs];
+  let pack=selectedPack==null?packs[0]:String(selectedPack);
+  if(!packs.includes(pack)){
+    return{
+      ok:false,error:'BANK_NAV_PACK_NOT_IN_CATEGORY',
+      category:key,requestedPack:pack,allowedPacks:packs
+    };
+  }
+  const floor=bankPackFloor(pack);
+  const floors=[...new Set(packs.map(bankPackFloor))];
+  if(floors.length!==1)return{ok:false,error:'BANK_NAV_CATEGORY_CROSSES_FLOORS',category:key,floors};
+  return{
+    ok:true,
+    kind:'CATEGORY',
+    category:key,
+    label:row.label,
+    packs,
+    selectedPack:pack,
+    selectedPackLabel:packDisplayName(pack),
+    floor,
+    floorLabel:FLOOR_LABELS[floor]||floor,
+    anchor:'pack-'+pack,
+    needsTravel:currentMap==null?null:String(currentMap)!==floor,
+    depositAllowed:row.deposit!==false,
+    migrate:row.migrate===true,
+    emergency:row.emergency===true
+  };
+}
+function resolve(target,options={}){
+  const raw=String(target||'').trim();
+  if(!raw)return{ok:false,error:'BANK_NAV_TARGET_REQUIRED'};
+  if(/^items\d+$/.test(raw)){
+    const p=packDescriptor(raw);
+    if(!p.ok)return p;
+    return{
+      ...p,
+      needsTravel:options.currentMap==null?null:String(options.currentMap)!==p.floor
+    };
+  }
+
+  const d=destination(raw);
+  if(d&&d.policyRequired===true&&!d.alias){
+    if(options.resolvedPack){
+      const p=packDescriptor(options.resolvedPack);
+      if(!p.ok)return p;
+      return{
+        ...p,
+        kind:'POLICY_RESOLVED_PACK',
+        requested:String(raw).toUpperCase(),
+        needsTravel:options.currentMap==null?null:String(options.currentMap)!==p.floor
+      };
+    }
+    return{
+      ok:false,
+      error:'BANK_NAV_POLICY_TARGET_REQUIRES_RESOLUTION',
+      target:String(raw).toUpperCase()
+    };
+  }
+
+  return categoryDescriptor(raw,{
+    selectedPack:options.selectedPack||null,
+    currentMap:options.currentMap||null
+  });
+}
+function listCategories(){
+  return Object.entries(BANK_LAYOUT).map(([category,row])=>({
+    category,
+    label:row.label,
+    packs:[...row.packs],
+    floor:row.packs.length?bankPackFloor(row.packs[0]):null,
+    floorLabel:row.packs.length?FLOOR_LABELS[bankPackFloor(row.packs[0])]||bankPackFloor(row.packs[0]):null,
+    depositAllowed:row.deposit!==false,
+    migrate:row.migrate===true,
+    emergency:row.emergency===true
+  }));
+}
+function listPacks(){
+  const out=[];
+  for(let n=0;n<=47;n++){
+    const pack='items'+n;
+    out.push(packDescriptor(pack));
+  }
+  return out;
+}
+function createBankNavigation(){
+  return{
+    resolve,
+    resolveCategory:categoryDescriptor,
+    resolvePack:packDescriptor,
+    listCategories,
+    listPacks,
+    packDisplayName,
+    health:async()=>({ok:true,categories:listCategories().length,packs:48})
+  };
+}
+
+module.exports={
+  FLOOR_LABELS,CATEGORY_ALIASES,
+  packNumber,normalizeCategory,packDisplayName,packDescriptor,
+  canonicalCategory,categoryDescriptor,resolve,listCategories,listPacks,
+  createBankNavigation
+};
+
+},{"../../core/contracts/AdventureLandContract":"core/contracts/AdventureLandContract.js","./BankLayoutPolicy":"organs/bank/BankLayoutPolicy.js","./BankDestinations":"organs/bank/BankDestinations.js"}],
+"organs/bank/BankOrganizer.js":[function(require,module,exports){
+'use strict';
+
+const {BANK_PACK_SIZE}=require('../../core/contracts/AdventureLandContract');
+const {BANK_LAYOUT,classifyItem}=require('./BankLayoutPolicy');
+const {createAccessoryOrganizer}=require('./AccessoryOrganizer');
+
+const clone=v=>v==null?v:JSON.parse(JSON.stringify(v));
+const CATEGORY_ORDER=Object.freeze(['GENERAL','CRAFTABLES','OTHER','EXCHANGEABLES','KEYS','ACCESSORY_MAX','ACCESSORIES','ARMOR','WEAPONS']);
+
+function normalizeSnapshot(snapshot){
+  const source=snapshot&&snapshot.packs&&typeof snapshot.packs==='object'?snapshot.packs:snapshot&&snapshot.bank&&typeof snapshot.bank==='object'?snapshot.bank:snapshot;
+  if(!source||typeof source!=='object')throw new Error('BANK_ORGANIZER_SNAPSHOT_REQUIRED');
+  const out=[];
+  for(const [pack,slots] of Object.entries(source)){
+    if(!/^items\d+$/.test(pack)||!Array.isArray(slots))continue;
+    for(let slot=0;slot<slots.length;slot++)if(slots[slot])out.push({pack,slot,item:clone(slots[slot])});
+  }
+  return out;
+}
+function positions(packs,reserved=new Set()){
+  const out=[];
+  for(const pack of packs)for(let slot=0;slot<BANK_PACK_SIZE;slot++)if(!reserved.has(pack+':'+slot))out.push({pack,slot});
+  return out;
+}
+function sortKey(entry,category,options){
+  const item=entry.item||{},decision=entry.decision||classifyItem(item,options);
+  let group='';
+  if(category==='ARMOR')group=String(decision.meta&&decision.meta.type||'');
+  if(category==='WEAPONS')group=String(decision.meta&&decision.meta.wtype||decision.meta&&decision.meta.type||'weapon');
+  return[group,String(item.name||''),String(999-Number(item.level||0)).padStart(3,'0'),String(item.p||''),String(entry.pack||''),String(entry.slot).padStart(3,'0')].join('|');
+}
+function createBankOrganizer({metaResolver,maxAccessoryLevels,maxAccessoryLevelResolver,isProtected=null}={}){
+  const options={metaResolver,maxAccessoryLevels,maxAccessoryLevelResolver};
+  const accessoryOrganizer=createAccessoryOrganizer(options);
+
+  function plan(snapshot){
+    const entries=normalizeSnapshot(snapshot),movable=[],held=[];
+    for(const entry of entries){
+      if(typeof isProtected==='function'&&isProtected(entry.item,entry)===true){held.push({...clone(entry),reason:'PROTECTED'});continue;}
+      const decision=classifyItem(entry.item,options);
+      if(decision&&decision.deposit===false){
+        held.push({...clone(entry),decision:clone(decision),reason:decision.reason||'DEPOSIT_BLOCKED'});
+        continue;
+      }
+      movable.push({...entry,decision});
+    }
+    const placements=[],blocked=[];
+    const reservedPositions=new Set(held.map(x=>String(x.pack)+':'+Number(x.slot)));
+    const accessoryPlan=accessoryOrganizer.plan(movable,{reservedPositions});
+    placements.push(...accessoryPlan.placements.map(x=>({...x,reason:'ACCESSORY_GROUPED'})));
+    blocked.push(...accessoryPlan.blocked);
+
+    for(const category of CATEGORY_ORDER){
+      if(category==='ACCESSORY_MAX'||category==='ACCESSORIES')continue;
+      const rows=movable.filter(x=>x.decision.category===category).sort((a,b)=>sortKey(a,category,options).localeCompare(sortKey(b,category,options)));
+      const targets=positions(BANK_LAYOUT[category].packs,reservedPositions);
+      for(let i=0;i<rows.length;i++){
+        const entry=rows[i],target=targets[i];
+        if(!target){blocked.push({entry:clone(entry),category,error:'BANK_CATEGORY_CAPACITY_EXHAUSTED'});continue;}
+        placements.push({entry:clone(entry),category,target,reason:entry.pack==='items3'?'MIGRATE_RETIRED_ITEMS3':'CANONICAL_LAYOUT'});
+      }
+    }
+
+    const key=p=>p.target.pack+':'+p.target.slot;
+    const seen=new Set();
+    for(const p of placements){if(seen.has(key(p)))throw new Error('BANK_ORGANIZER_TARGET_COLLISION_'+key(p));seen.add(key(p));}
+    placements.sort((a,b)=>CATEGORY_ORDER.indexOf(a.category)-CATEGORY_ORDER.indexOf(b.category)||a.target.pack.localeCompare(b.target.pack)||a.target.slot-b.target.slot);
+    const moves=placements.filter(p=>String(p.entry.pack)!==p.target.pack||Number(p.entry.slot)!==p.target.slot);
+    const stays=placements.filter(p=>String(p.entry.pack)===p.target.pack&&Number(p.entry.slot)===p.target.slot);
+    const overflowRequests=blocked.map(row=>({category:row.category,item:clone(row.entry&&row.entry.item),from:row.entry?{pack:row.entry.pack,slot:row.entry.slot}:null,reason:row.error}));
+    return{
+      ok:blocked.length===0,
+      planVersion:1,
+      placements,moves,stays,held,blocked,overflowRequests,
+      summary:{items:entries.length,movable:movable.length,moves:moves.length,stays:stays.length,held:held.length,blocked:blocked.length,items3Migrations:moves.filter(x=>x.entry.pack==='items3').length}
+    };
+  }
+
+  async function organize(snapshot,{moveOps=null,verifyOps=null}={}){
+    const planResult=plan(snapshot);
+    if(!planResult.ok)return{ok:false,error:'BANK_ORGANIZER_CAPACITY_BLOCKED',plan:planResult};
+    if(!moveOps)return{ok:true,planned:true,executed:false,plan:planResult};
+    if(typeof moveOps.applyPlan!=='function')return{ok:false,error:'BANK_MOVE_OPS_CONTRACT_INVALID',plan:planResult};
+    const moveProof=await moveOps.applyPlan(clone(planResult));
+    if(!moveProof||moveProof.ok!==true)return{ok:false,error:'BANK_MOVE_OPS_FAILED',plan:planResult,moveProof:clone(moveProof)};
+    if(verifyOps){
+      if(typeof verifyOps.verifyPlan!=='function')return{ok:false,error:'BANK_VERIFY_OPS_CONTRACT_INVALID',plan:planResult,moveProof:clone(moveProof)};
+      const verifyProof=await verifyOps.verifyPlan(clone(planResult),clone(moveProof));
+      if(!verifyProof||verifyProof.ok!==true)return{ok:false,error:'BANK_ORGANIZER_VERIFY_FAILED',plan:planResult,moveProof:clone(moveProof),verifyProof:clone(verifyProof)};
+      return{ok:true,planned:true,executed:true,verified:true,plan:planResult,moveProof:clone(moveProof),verifyProof:clone(verifyProof)};
+    }
+    return{ok:true,planned:true,executed:true,verified:false,plan:planResult,moveProof:clone(moveProof)};
+  }
+
+  return{plan,organize};
+}
+
+module.exports={CATEGORY_ORDER,normalizeSnapshot,createBankOrganizer};
+
+},{"../../core/contracts/AdventureLandContract":"core/contracts/AdventureLandContract.js","./BankLayoutPolicy":"organs/bank/BankLayoutPolicy.js","./AccessoryOrganizer":"organs/bank/AccessoryOrganizer.js"}],
+"organs/bank/BankRetrieveOps.js":[function(require,module,exports){
+'use strict';
+
+const {identity}=require('../../ligaments/inventory/InventoryService');
+const {bankPackFloor}=require('../../core/contracts/AdventureLandContract');
+
+const clone=v=>v==null?v:JSON.parse(JSON.stringify(v));
+
+function bankItem(snapshot,pack,slot){
+  const source=snapshot&&snapshot.packs&&typeof snapshot.packs==='object'?snapshot.packs:snapshot;
+  const slots=source&&source[String(pack||'')];
+  return Array.isArray(slots)?clone(slots[Number(slot)]||null):null;
+}
+
+function firstFreeInventorySlot(items){
+  if(!Array.isArray(items))return-1;
+  for(let i=0;i<items.length;i++)if(!items[i])return i;
+  return-1;
+}
+
+function createBankRetrieveOps({adapter,inventory,travel=null}={}){
+  if(!adapter||typeof adapter.snapshot!=='function'||typeof adapter.retrieve!=='function')throw new Error('BANK_RETRIEVE_ADAPTER_REQUIRED');
+  if(!inventory||typeof inventory.snapshot!=='function'||typeof inventory.slot!=='function')throw new Error('BANK_RETRIEVE_INVENTORY_REQUIRED');
+
+  async function snapshot(){return clone(await adapter.snapshot());}
+
+  async function retrieveExact({pack,slot,expectedIdentity,inventorySlot=null,allowStack=false}={}){
+    const bankPack=String(pack||'');
+    const bankSlot=Number(slot);
+    if(!bankPack||!Number.isInteger(bankSlot)||bankSlot<0)return{ok:false,error:'BANK_RETRIEVE_SOURCE_INVALID'};
+
+    const sourceFloor=bankPackFloor(bankPack);
+    if(!sourceFloor)return{ok:false,error:'BANK_RETRIEVE_PACK_INVALID',pack:bankPack};
+    if(travel&&typeof travel.toFloor==='function'){
+      const moved=await travel.toFloor(sourceFloor,{reason:'BANK_RETRIEVE_EXACT',target:{pack:bankPack,slot:bankSlot}});
+      if(!moved||moved.ok!==true){
+        return{ok:false,error:'BANK_RETRIEVE_TRAVEL_FAILED',pack:bankPack,slot:bankSlot,targetFloor:sourceFloor,travel:clone(moved)};
+      }
+    }
+
+    const beforeBank=await adapter.snapshot();
+    const sourceItem=bankItem(beforeBank,bankPack,bankSlot);
+    if(!sourceItem)return{ok:false,error:'BANK_RETRIEVE_SOURCE_EMPTY',pack:bankPack,slot:bankSlot};
+    const actualIdentity=identity(sourceItem);
+    if(expectedIdentity&&actualIdentity!==String(expectedIdentity)){
+      return{ok:false,error:'BANK_RETRIEVE_IDENTITY_CHANGED',expected:String(expectedIdentity),actual:actualIdentity,pack:bankPack,slot:bankSlot};
+    }
+    if(Number(sourceItem.q||1)!==1&&allowStack!==true)return{ok:false,error:'BANK_RETRIEVE_STACK_UNSAFE',identity:actualIdentity};
+
+    let target=inventorySlot==null?null:Number(inventorySlot);
+    const items=await inventory.snapshot();
+    if(target==null)target=firstFreeInventorySlot(items);
+    if(!Number.isInteger(target)||target<0)return{ok:false,error:'BANK_RETRIEVE_NO_FREE_INVENTORY_SLOT'};
+    if(items[target])return{ok:false,error:'BANK_RETRIEVE_TARGET_OCCUPIED',inventorySlot:target};
+
+    const result=await adapter.retrieve(bankPack,bankSlot,target);
+    if(result&&result.ok===false)return{ok:false,error:'BANK_RETRIEVE_NATIVE_FAILED',result:clone(result)};
+
+    const received=await inventory.slot(target);
+    const receivedIdentity=identity(received);
+    if(!received||receivedIdentity!==actualIdentity){
+      return{ok:false,error:'BANK_RETRIEVE_VERIFY_INVENTORY_FAILED',expected:actualIdentity,actual:receivedIdentity,inventorySlot:target};
+    }
+
+    const afterBank=await adapter.snapshot();
+    const remaining=bankItem(afterBank,bankPack,bankSlot);
+    if(remaining&&identity(remaining)===actualIdentity){
+      return{ok:false,error:'BANK_RETRIEVE_VERIFY_SOURCE_NOT_CLEARED',identity:actualIdentity,pack:bankPack,slot:bankSlot};
+    }
+
+    return{
+      ok:true,verified:true,
+      source:{pack:bankPack,slot:bankSlot},
+      inventorySlot:target,
+      item:clone(received),
+      quantity:Math.max(1,Number(received&&received.q||1)),
+      identity:receivedIdentity,
+      nativeResult:clone(result)
+    };
+  }
+
+  return{snapshot,retrieveExact};
+}
+
+module.exports={bankItem,firstFreeInventorySlot,createBankRetrieveOps};
+
+},{"../../ligaments/inventory/InventoryService":"ligaments/inventory/InventoryService.js","../../core/contracts/AdventureLandContract":"core/contracts/AdventureLandContract.js"}],
+"organs/bank/BankState.js":[function(require,module,exports){
+'use strict';
+
+const BANK_STEPS=Object.freeze(['ENTER','TRAVEL','SCAN','APPLY_POLICY','ORGANIZE','VERIFY','HANDOFF','PUBLISH','EXIT']);
+const clone=value=>value==null?value:JSON.parse(JSON.stringify(value));
+
+function validateSession(session){
+  if(!session||typeof session!=='object')throw new Error('BANK_SESSION_REQUIRED');
+  if(session.version!==3)throw new Error('BANK_SESSION_VERSION_INVALID');
+  if(session.state!=='BANK')throw new Error('BANK_SESSION_STATE_INVALID');
+  const step=session.step;
+  if(step!=='COMPLETE'&&!BANK_STEPS.includes(step))throw new Error('BANK_STEP_INVALID_'+String(step));
+  if(!Array.isArray(session.completed))throw new Error('BANK_COMPLETED_INVALID');
+  if(!session.proofs||typeof session.proofs!=='object')throw new Error('BANK_PROOFS_INVALID');
+
+  const expectedCount=step==='COMPLETE'?BANK_STEPS.length:BANK_STEPS.indexOf(step);
+  const expected=BANK_STEPS.slice(0,expectedCount);
+  if(session.completed.length!==expected.length||session.completed.some((x,i)=>x!==expected[i])){
+    throw new Error('BANK_COMPLETED_OUT_OF_ORDER');
+  }
+  for(const done of expected){
+    const proof=session.proofs[done];
+    if(!proof||proof.ok!==true)throw new Error('BANK_PROOF_MISSING_'+done);
+  }
+  return true;
+}
+
+function createBankState({ops,initialSession,recoveryStore=null}={}){
+  if(!ops||typeof ops!=='object')throw new Error('BANK_OPS_REQUIRED');
+  function newSession(){
+    return{
+      version:3,
+      state:'BANK',
+      step:'ENTER',
+      completed:[],
+      proofs:{},
+      lastError:null
+    };
+  }
+  let session=initialSession&&typeof initialSession==='object'?clone(initialSession):newSession();
+  validateSession(session);
+
+  async function checkpoint(reason){
+    if(!recoveryStore||typeof recoveryStore.save!=='function')return{ok:true,skipped:true,reason:'RECOVERY_STORE_UNAVAILABLE'};
+    const saved=await recoveryStore.save(session,{reason});
+    if(!saved||saved.ok!==true){
+      const error=saved&&saved.error||'BANK_RECOVERY_CHECKPOINT_FAILED';
+      session.recoveryError=String(error);
+      throw new Error(String(error));
+    }
+    session.recoveryError=null;
+    return saved;
+  }
+
+  function status(){return{status:session.step==='COMPLETE'?'COMPLETE':'READY',session:clone(session)};}
+
+  function begin(){
+    validateSession(session);
+    if(session.step!=='COMPLETE')return{ok:true,resumed:true,status:status()};
+    session=newSession();
+    return{ok:true,resumed:false,status:status()};
+  }
+
+  function advance(step,proof){
+    const index=BANK_STEPS.indexOf(step);
+    session.completed=[...(session.completed||[]),step];
+    session.proofs={...(session.proofs||{}),[step]:clone(proof)};
+    session.lastError=null;
+    session.step=index===BANK_STEPS.length-1?'COMPLETE':BANK_STEPS[index+1];
+    validateSession(session);
+  }
+
+  async function runStep(){
+    validateSession(session);
+    if(session.step==='COMPLETE')return{status:'COMPLETE',session:clone(session),advanced:false};
+    const step=session.step;
+    await checkpoint('BANK_RUN_START_'+String(step));
+    const fn=ops[step.toLowerCase()];
+    if(typeof fn!=='function'&&step!=='HANDOFF')throw new Error('BANK_STEP_OWNER_MISSING_'+step);
+    try{
+      const result=typeof fn==='function'
+        ? await fn({step,session:clone(session)})
+        : {ok:true,skipped:true,reason:'HANDOFF_OP_UNAVAILABLE'};
+      if(!result||result.ok!==true||result.failed===true||result.success===false){
+        throw new Error('BANK_STEP_NOT_PROVEN_'+step);
+      }
+      advance(step,result);
+      await checkpoint('BANK_STEP_PROVEN_'+step);
+      return{
+        status:session.step==='COMPLETE'?'COMPLETE':'READY',
+        session:clone(session),
+        advanced:true,
+        completed_step:step
+      };
+    }catch(error){
+      session.lastError=String(error&&error.message||error);
+      try{await checkpoint('BANK_STEP_FAILED_'+step);}
+      catch(recoveryError){
+        session.recoveryError=String(recoveryError&&recoveryError.message||recoveryError);
+      }
+      throw error;
+    }
+  }
+
+  async function run(){
+    let out={status:session.step==='COMPLETE'?'COMPLETE':'READY',session:clone(session),advanced:false};
+    while(out.status!=='COMPLETE')out=await runStep();
+    return out;
+  }
+
+  function restore(next){
+    const candidate=clone(next);
+    validateSession(candidate);
+    session=candidate;
+    return status();
+  }
+
+  return{begin,runStep,run,getStatus:status,restore};
+}
+
+module.exports={BANK_STEPS,validateSession,createBankState};
+
+},{}],
+"organs/bank/BankStoreOps.js":[function(require,module,exports){
+'use strict';
+
+const {identity}=require('../../ligaments/inventory/InventoryService');
+const {classifyItem,destinationPacks}=require('./BankLayoutPolicy');
+const {bankPackFloor}=require('../../core/contracts/AdventureLandContract');
+
+const clone=v=>v==null?v:JSON.parse(JSON.stringify(v));
+
+function snapshotPacks(snapshot){
+  return snapshot&&snapshot.packs&&typeof snapshot.packs==='object'?snapshot.packs:snapshot;
+}
+
+function firstOpenFreeTarget(snapshot,packs){
+  const source=snapshotPacks(snapshot);
+  if(!source||typeof source!=='object')return null;
+  for(const pack of packs||[]){
+    const slots=source[pack];
+    if(!Array.isArray(slots))continue;
+    for(let slot=0;slot<slots.length;slot++)if(!slots[slot])return{pack,slot};
+  }
+  return null;
+}
+
+function createBankStoreOps({adapter,inventory,metaResolver=null,travel=null}={}){
+  if(!adapter||typeof adapter.snapshot!=='function'||typeof adapter.store!=='function')throw new Error('BANK_STORE_ADAPTER_REQUIRED');
+  if(!inventory||typeof inventory.slot!=='function')throw new Error('BANK_STORE_INVENTORY_REQUIRED');
+
+  async function storeExact({inventorySlot,expectedIdentity,item=null}={}){
+    const invSlot=Number(inventorySlot);
+    if(!Number.isInteger(invSlot)||invSlot<0)return{ok:false,error:'BANK_STORE_INVENTORY_SLOT_INVALID'};
+
+    const current=await inventory.slot(invSlot);
+    if(!current)return{ok:false,error:'BANK_STORE_INVENTORY_EMPTY',inventorySlot:invSlot};
+    const actualIdentity=identity(current);
+    if(expectedIdentity&&actualIdentity!==String(expectedIdentity)){
+      return{ok:false,error:'BANK_STORE_IDENTITY_CHANGED',expected:String(expectedIdentity),actual:actualIdentity,inventorySlot:invSlot};
+    }
+
+    const candidate=item||current;
+    const decision=classifyItem(candidate,{metaResolver});
+    if(decision.deposit===false){
+      return{ok:false,error:'BANK_STORE_POLICY_BLOCKED',decision:clone(decision),identity:actualIdentity};
+    }
+    const packs=destinationPacks(decision.category);
+    if(!packs.length)return{ok:false,error:'BANK_STORE_DESTINATION_UNRESOLVED',decision:clone(decision)};
+
+    const targetFloor=bankPackFloor(packs[0]);
+    if(!targetFloor)return{ok:false,error:'BANK_STORE_DESTINATION_FLOOR_INVALID',decision:clone(decision)};
+    if(travel&&typeof travel.toFloor==='function'){
+      const moved=await travel.toFloor(targetFloor,{reason:'BANK_STORE_EXACT',target:{category:decision.category,packs}});
+      if(!moved||moved.ok!==true){
+        return{ok:false,error:'BANK_STORE_TRAVEL_FAILED',category:decision.category,targetFloor,travel:clone(moved)};
+      }
+    }
+
+    const before=await adapter.snapshot();
+    const target=firstOpenFreeTarget(before,packs);
+    if(!target){
+      const first=packs[0]||null;
+      return{
+        ok:false,
+        error:'BANK_STORE_TARGET_PACK_NOT_OPEN_OR_FULL',
+        category:decision.category,
+        allowedPacks:packs,
+        targetFloor:first?bankPackFloor(first):null,
+        needsTravel:true
+      };
+    }
+
+    const result=await adapter.store(invSlot,target.pack,target.slot);
+    if(result&&result.ok===false)return{ok:false,error:'BANK_STORE_NATIVE_FAILED',result:clone(result),target};
+
+    const after=await adapter.snapshot();
+    const source=snapshotPacks(after);
+    const stored=source&&Array.isArray(source[target.pack])?source[target.pack][target.slot]||null:null;
+    const storedIdentity=identity(stored);
+    if(!stored||storedIdentity!==actualIdentity){
+      return{ok:false,error:'BANK_STORE_VERIFY_TARGET_FAILED',expected:actualIdentity,actual:storedIdentity,target};
+    }
+
+    const remaining=await inventory.slot(invSlot);
+    if(remaining&&identity(remaining)===actualIdentity){
+      return{ok:false,error:'BANK_STORE_VERIFY_INVENTORY_NOT_CLEARED',identity:actualIdentity,inventorySlot:invSlot,target};
+    }
+
+    return{
+      ok:true,verified:true,
+      category:decision.category,
+      reason:decision.reason,
+      pack:target.pack,
+      slot:target.slot,
+      floor:bankPackFloor(target.pack),
+      inventorySlot:invSlot,
+      identity:storedIdentity,
+      item:clone(stored),
+      nativeResult:clone(result)
+    };
+  }
+
+  return{storeExact};
+}
+
+module.exports={snapshotPacks,firstOpenFreeTarget,createBankStoreOps};
+
+},{"../../ligaments/inventory/InventoryService":"ligaments/inventory/InventoryService.js","./BankLayoutPolicy":"organs/bank/BankLayoutPolicy.js","../../core/contracts/AdventureLandContract":"core/contracts/AdventureLandContract.js"}],
+"organs/bank/BankTravelOps.js":[function(require,module,exports){
+'use strict';
+
+const {createRouteService}=require('../../ligaments/movement/RouteService');
+const {BANK_ROUTE_REVISION,BANK_ROUTE_MODEL,BANK_FLOORS,BANK_GRAPH}=require('../../adapters/pogipath/BankRouteModel');
+
+const OWNER='BANK';
+const PRIORITY=50;
+const clone=v=>v==null?v:JSON.parse(JSON.stringify(v));
+
+function bankFloor(value){
+  const id=String(value||'');
+  return BANK_FLOORS.includes(id)?id:null;
+}
+
+function edgeFor(from,to){
+  const id=String(from)+'->'+String(to);
+  return BANK_ROUTE_MODEL.edges.find(x=>x.id===id)||null;
+}
+
+function shortestFloorPath(from,target){
+  const to=bankFloor(target);
+  if(!to)return{ok:false,error:'BANK_TRAVEL_TARGET_FLOOR_INVALID',target:String(target||'')||null};
+
+  let start=bankFloor(from);
+  const prefix=[];
+  if(!start){
+    prefix.push({
+      id:'external->bank',
+      from:String(from||'external')||'external',
+      to:'bank',
+      type:'SMART_MOVE_BANK_ENTRY',
+      enabled:true
+    });
+    start='bank';
+  }
+  if(start===to)return{ok:true,from:String(from||''),target:to,hops:prefix};
+
+  const queue=[[start,[]]],seen=new Set([start]);
+  while(queue.length){
+    const [node,path]=queue.shift();
+    for(const next of BANK_GRAPH[node]||[]){
+      if(seen.has(next))continue;
+      const edge=edgeFor(node,next);
+      if(!edge)continue;
+      const nextPath=[...path,clone(edge)];
+      if(next===to)return{ok:true,from:String(from||''),target:to,hops:[...prefix,...nextPath]};
+      seen.add(next);
+      queue.push([next,nextPath]);
+    }
+  }
+  return{ok:false,error:'BANK_TRAVEL_PATH_UNAVAILABLE',from:String(from||''),target:to};
+}
+
+function createBankTravelOps({
+  movement,
+  navigation,
+  adapter,
+  routeService=null,
+  character='Rentaro',
+  now=Date.now,
+  maxRecoveryAttempts=3
+}={}){
+  if(!movement||typeof movement.acquire!=='function'||typeof movement.smartMove!=='function'||typeof movement.release!=='function'){
+    throw new Error('BANK_TRAVEL_MOVEMENT_REQUIRED');
+  }
+  if(!navigation||typeof navigation.resolve!=='function')throw new Error('BANK_TRAVEL_NAVIGATION_REQUIRED');
+  if(!adapter||typeof adapter.currentMap!=='function')throw new Error('BANK_TRAVEL_MAP_ADAPTER_REQUIRED');
+
+  const route=routeService||createRouteService({now,maxRecoveryAttempts});
+  const observed=route.observeModel({revision:BANK_ROUTE_REVISION,model:BANK_ROUTE_MODEL});
+  if(!observed||observed.ok!==true)throw new Error('BANK_TRAVEL_ROUTE_MODEL_UNAVAILABLE');
+
+  let lastResult=null;
+  let attempts=0;
+
+  function currentMap(){
+    const map=adapter.currentMap();
+    return map==null?null:String(map);
+  }
+
+  function resolveTarget(target,options={}){
+    const floor=bankFloor(target);
+    if(floor)return{ok:true,kind:'FLOOR',floor,label:floor};
+    const descriptor=navigation.resolve(target,{
+      selectedPack:options.selectedPack||null,
+      resolvedPack:options.resolvedPack||null,
+      currentMap:currentMap()
+    });
+    if(!descriptor||descriptor.ok!==true)return descriptor||{ok:false,error:'BANK_TRAVEL_TARGET_UNRESOLVED'};
+    if(!bankFloor(descriptor.floor))return{ok:false,error:'BANK_TRAVEL_TARGET_FLOOR_INVALID',descriptor:clone(descriptor)};
+    return{ok:true,kind:descriptor.kind,floor:descriptor.floor,descriptor:clone(descriptor)};
+  }
+
+  async function moveHop(edge,{reason}={}){
+    const marked=route.markEdgeStarted(edge.id);
+    if(!marked||marked.ok!==true)return{ok:false,error:marked&&marked.error||'BANK_ROUTE_EDGE_START_FAILED',edge:clone(edge)};
+
+    const lease=movement.acquire(OWNER,{priority:PRIORITY});
+    if(!lease||lease.ok!==true){
+      route.reportFailure('BANK_MOVEMENT_LEASE_FAILED',{edge,lease});
+      return{ok:false,error:'BANK_MOVEMENT_LEASE_FAILED',edge:clone(edge),lease:clone(lease)};
+    }
+
+    let moved;
+    try{
+      moved=await movement.smartMove(OWNER,{map:edge.to},{
+        source:'POGIPATH_BANK_TRAVEL',
+        reason:String(reason||'BANK_TRAVEL'),
+        expectedMap:edge.to
+      });
+    }finally{
+      movement.release(OWNER);
+    }
+
+    if(!moved||moved.ok!==true){
+      const recovery=route.reportFailure('BANK_SMART_MOVE_FAILED',{edge,moved});
+      return{
+        ok:false,
+        retrying:!!(recovery&&recovery.retrying),
+        error:'BANK_SMART_MOVE_FAILED',
+        edge:clone(edge),
+        movement:clone(moved),
+        recovery:clone(recovery)
+      };
+    }
+
+    const actual=currentMap();
+    if(actual!==edge.to){
+      const recovery=route.reportFailure('BANK_ARRIVAL_PROOF_FAILED',{edge,expected:edge.to,actual});
+      return{
+        ok:false,
+        retrying:!!(recovery&&recovery.retrying),
+        error:'BANK_ARRIVAL_PROOF_FAILED',
+        edge:clone(edge),
+        expectedMap:edge.to,
+        actualMap:actual,
+        recovery:clone(recovery)
+      };
+    }
+
+    const checkpoint=route.markSafeCheckpoint('bank-floor:'+edge.to,{position:{map:actual}});
+    if(!checkpoint||checkpoint.ok!==true){
+      return{ok:false,error:checkpoint&&checkpoint.error||'BANK_ROUTE_CHECKPOINT_FAILED',edge:clone(edge),checkpoint:clone(checkpoint)};
+    }
+    return{
+      ok:true,
+      edge:clone(edge),
+      map:actual,
+      checkpoint:clone(checkpoint)
+    };
+  }
+
+  async function toFloor(targetFloor,{reason='BANK_TRAVEL',target=null}={}){
+    const floor=bankFloor(targetFloor);
+    if(!floor)return{ok:false,error:'BANK_TRAVEL_TARGET_FLOOR_INVALID',targetFloor:String(targetFloor||'')||null};
+
+    attempts++;
+    const start=currentMap();
+    const requested=route.request({
+      owner:OWNER,
+      character:String(character||'Rentaro'),
+      destination:{kind:'BANK_FLOOR',floor,target:clone(target)}
+    });
+    if(!requested||requested.ok!==true){
+      lastResult={ok:false,error:requested&&requested.error||'BANK_ROUTE_REQUEST_FAILED',route:clone(requested)};
+      return clone(lastResult);
+    }
+
+    if(start===floor){
+      const arrived=route.arrive({
+        requiredMap:floor,
+        actualMap:start,
+        alreadyThere:true,
+        arrivalProof:'CHARACTER_MAP_EQUALS_DESTINATION'
+      });
+      lastResult={
+        ok:true,
+        alreadyThere:true,
+        targetFloor:floor,
+        startMap:start,
+        finalMap:start,
+        hops:[],
+        hopCount:0,
+        route:clone(route.getStatus()),
+        arrival:clone(arrived),
+        pogipath:{shadowOnly:true,characterRoutingConnected:false,movementExecutor:'MovementService'}
+      };
+      return clone(lastResult);
+    }
+
+    const completed=[];
+    let guard=0;
+    while(currentMap()!==floor){
+      if(++guard>12){
+        route.fail('BANK_TRAVEL_LOOP_GUARD',{targetFloor:floor,currentMap:currentMap()});
+        lastResult={ok:false,error:'BANK_TRAVEL_LOOP_GUARD',targetFloor:floor,currentMap:currentMap(),hops:clone(completed)};
+        return clone(lastResult);
+      }
+
+      const plan=shortestFloorPath(currentMap(),floor);
+      if(!plan.ok){
+        route.fail(plan.error,plan);
+        lastResult={...clone(plan),hops:clone(completed),route:clone(route.getStatus())};
+        return clone(lastResult);
+      }
+      if(!plan.hops.length)break;
+
+      const hop=await moveHop(plan.hops[0],{reason});
+      if(!hop.ok){
+        if(hop.retrying===true)continue;
+        lastResult={
+          ok:false,
+          error:hop.error,
+          targetFloor:floor,
+          startMap:start,
+          currentMap:currentMap(),
+          hops:clone(completed),
+          failedHop:clone(hop),
+          route:clone(route.getStatus())
+        };
+        return clone(lastResult);
+      }
+      completed.push(hop);
+    }
+
+    const finalMap=currentMap();
+    if(finalMap!==floor){
+      route.fail('BANK_FINAL_ARRIVAL_PROOF_FAILED',{expected:floor,actual:finalMap});
+      lastResult={
+        ok:false,error:'BANK_FINAL_ARRIVAL_PROOF_FAILED',
+        expectedMap:floor,actualMap:finalMap,hops:clone(completed),route:clone(route.getStatus())
+      };
+      return clone(lastResult);
+    }
+
+    const arrived=route.arrive({
+      requiredMap:floor,
+      actualMap:finalMap,
+      arrivalProof:'CHARACTER_MAP_EQUALS_DESTINATION',
+      hopCount:completed.length
+    });
+    lastResult={
+      ok:true,
+      targetFloor:floor,
+      startMap:start,
+      finalMap,
+      hops:clone(completed),
+      hopCount:completed.length,
+      route:clone(route.getStatus()),
+      arrival:clone(arrived),
+      pogipath:{shadowOnly:true,characterRoutingConnected:false,movementExecutor:'MovementService'}
+    };
+    return clone(lastResult);
+  }
+
+  async function travelTo(target,options={}){
+    const resolved=resolveTarget(target,options);
+    if(!resolved||resolved.ok!==true)return resolved||{ok:false,error:'BANK_TRAVEL_TARGET_UNRESOLVED'};
+    const out=await toFloor(resolved.floor,{
+      reason:options.reason||'BANK_TRAVEL',
+      target:resolved.descriptor||{kind:resolved.kind,floor:resolved.floor}
+    });
+    return{...out,resolved:clone(resolved)};
+  }
+
+  async function toPack(pack,options={}){
+    return travelTo(String(pack||''),{...options,reason:options.reason||'BANK_PACK_TRAVEL'});
+  }
+
+  async function travel({session}={}){
+    const out=await travelTo('GENERAL',{reason:'BANK_STATE_TRAVEL'});
+    if(!out||out.ok!==true)return out;
+    return{
+      ok:true,
+      targetFloor:out.targetFloor,
+      startMap:out.startMap,
+      finalMap:out.finalMap,
+      hopCount:out.hopCount,
+      hops:clone(out.hops),
+      arrival:clone(out.arrival),
+      route:clone(out.route),
+      pogipath:clone(out.pogipath),
+      recoveryStep:session&&session.step||'TRAVEL'
+    };
+  }
+
+  async function health(){
+    return{
+      ok:true,
+      currentMap:currentMap(),
+      attempts,
+      lastResult:clone(lastResult),
+      route:clone(route.getStatus()),
+      model:{revision:BANK_ROUTE_REVISION,source:clone(BANK_ROUTE_MODEL.source)}
+    };
+  }
+
+  function snapshot(){
+    return{
+      version:3,
+      state:'BANK_TRAVEL',
+      currentMap:currentMap(),
+      attempts,
+      lastResult:clone(lastResult),
+      route:clone(route.getStatus())
+    };
+  }
+
+  return{
+    travel,travelTo,toFloor,toPack,resolveTarget,
+    health,snapshot,routeStatus:()=>clone(route.getStatus())
+  };
+}
+
+module.exports={OWNER,PRIORITY,bankFloor,edgeFor,shortestFloorPath,createBankTravelOps};
+
+},{"../../ligaments/movement/RouteService":"ligaments/movement/RouteService.js","../../adapters/pogipath/BankRouteModel":"adapters/pogipath/BankRouteModel.js"}],
+"organs/bosses/BossMissionCoordinator.js":[function(require,module,exports){
+'use strict';
+
+const {BOSS_MTYPES,EVENT_BOSS_MTYPES}=require('./ScanBossState');
+
+const BUS_KEY='__POGI_V3_BOSS_MISSION_BUS_V1';
+const BUS_SCHEMA=1;
+const DEFAULT_TTL_MS=4000;
+const DEFAULT_ACTIVATION_RADIUS=200;
+const BOSS_SET=new Set(BOSS_MTYPES.map(String));
+const EVENT_BOSS_SET=new Set(EVENT_BOSS_MTYPES.map(String));
+
+function clone(value){return value==null?value:JSON.parse(JSON.stringify(value));}
+function finite(value,fallback=null){const n=Number(value);return Number.isFinite(n)?n:fallback;}
+function sharedRoot(root){
+  const local=root&&typeof root==='object'?root:(typeof globalThis!=='undefined'?globalThis:{});
+  try{
+    if(local&&local.top&&typeof local.top==='object')return local.top;
+  }catch(error){}
+  return local;
+}
+function activeMonster(row){
+  return !!row&&row.type==='monster'&&row.dead!==true&&row.rip!==true&&row.visible!==false;
+}
+function bossIdentity(row,id=''){
+  if(!row||typeof row!=='object')return null;
+  const mtype=String(row.mtype||row.type_name||'');
+  if(!BOSS_SET.has(mtype))return null;
+  return{
+    boss_id:String(row.id||id||''),
+    mtype,
+    map:String(row.map||''),
+    instance:String(row.in||row.instance||''),
+    x:finite(row.real_x!==undefined?row.real_x:row.x),
+    y:finite(row.real_y!==undefined?row.real_y:row.y),
+    distance:finite(row.distance,Infinity)
+  };
+}
+
+function createBossMissionCoordinator({
+  root=(typeof globalThis!=='undefined'?globalThis:{}),
+  characterName='',
+  role='',
+  now=Date.now,
+  ttlMs=DEFAULT_TTL_MS,
+  activationRadius=DEFAULT_ACTIVATION_RADIUS,
+  transport=null
+}={}){
+  const character=String(characterName||'');
+  const roleName=String(role||'');
+  const frameRoot=sharedRoot(root);
+  const leaseMs=Math.max(1000,Number(ttlMs)||DEFAULT_TTL_MS);
+  const radius=Math.max(1,Number(activationRadius)||DEFAULT_ACTIVATION_RADIUS);
+  let lastSeenSequence=0;
+  let lastLocalObservation=null;
+
+  function bus(){
+    try{
+      const existing=frameRoot[BUS_KEY];
+      if(existing&&existing.schema===BUS_SCHEMA&&typeof existing==='object')return existing;
+      const created={schema:BUS_SCHEMA,sequence:0,mission:null,updated_at:0};
+      frameRoot[BUS_KEY]=created;
+      return created;
+    }catch(error){
+      return{schema:BUS_SCHEMA,sequence:0,mission:null,updated_at:0,ephemeral:true};
+    }
+  }
+
+  function validMission(mission){
+    if(!mission||typeof mission!=='object')return false;
+    const expires=Number(mission.lease_until||0);
+    if(!Number.isFinite(expires)||expires<=Number(now()))return false;
+    const mtype=String(mission.mtype||'');
+    const id=String(mission.boss_id||'');
+    if(!mtype&&!id)return false;
+    if(mtype&&!BOSS_SET.has(mtype))return false;
+    return true;
+  }
+
+  function readTransport(){
+    if(!transport||typeof transport.read!=='function')return null;
+    try{
+      const value=transport.read();
+      if(value&&typeof value.then==='function')return null;
+      return validMission(value)?clone(value):null;
+    }catch(error){return null;}
+  }
+
+  function writeTransport(mission){
+    if(!transport||typeof transport.publish!=='function')return;
+    try{
+      const result=transport.publish(clone(mission));
+      if(result&&typeof result.catch==='function')result.catch(()=>{});
+    }catch(error){}
+  }
+
+  function current(){
+    const remote=readTransport();
+    if(remote)return remote;
+    const row=bus();
+    if(!validMission(row.mission)){
+      if(row.mission&&Number(row.mission.lease_until||0)<=Number(now()))row.mission=null;
+      return null;
+    }
+    lastSeenSequence=Math.max(lastSeenSequence,Number(row.mission.sequence||0));
+    return clone(row.mission);
+  }
+
+  function publish(identity,{source='LOCAL_VISIBLE',reason='BOSS_PRIORITY'}={}){
+    if(!identity||typeof identity!=='object')return{ok:false,error:'BOSS_IDENTITY_REQUIRED'};
+    const mtype=String(identity.mtype||'');
+    const bossId=String(identity.boss_id||identity.id||'');
+    if(mtype&&!BOSS_SET.has(mtype))return{ok:false,error:'BOSS_MTYPE_NOT_APPROVED',mtype};
+    if(!mtype&&!bossId)return{ok:false,error:'BOSS_IDENTITY_REQUIRED'};
+    const row=bus();
+    const at=Number(now());
+    const previous=validMission(row.mission)?row.mission:null;
+    const map=String(identity.map||'');
+    const instance=String(identity.instance||identity.in||'');
+    const sameBoss=!!(
+      previous &&
+      (
+        (bossId&&String(previous.boss_id||'')===bossId) ||
+        (
+          !bossId &&
+          !String(previous.boss_id||'') &&
+          String(previous.mtype||'')===mtype &&
+          String(previous.map||'')===map &&
+          String(previous.instance||'')===instance
+        )
+      )
+    );
+    const sequence=sameBoss
+      ?Number(previous.sequence||row.sequence||lastSeenSequence||1)
+      :Math.max(Number(row.sequence||0),lastSeenSequence)+1;
+    const mission={
+      schema:BUS_SCHEMA,
+      sequence,
+      state:'WORLD_BOSS',
+      boss_id:bossId||null,
+      mtype:mtype||null,
+      boss_class:EVENT_BOSS_SET.has(mtype)?'EVENT_BOSS':'REGULAR_BOSS',
+      map,
+      instance,
+      x:finite(identity.x),
+      y:finite(identity.y),
+      source:String(source||'LOCAL_VISIBLE'),
+      reason:String(reason||'BOSS_PRIORITY'),
+      rally_mode:String(identity.rally_mode||'DEFAULT'),
+      observed_by:character||null,
+      observed_role:roleName||null,
+      observed_at:at,
+      lease_until:at+leaseMs,
+      warrior_started_boss_id:sameBoss?String(previous.warrior_started_boss_id||''):null,
+      warrior_started_at:sameBoss?finite(previous.warrior_started_at):null,
+      warrior_started_by:sameBoss?String(previous.warrior_started_by||''):null,
+      help_requested_for:sameBoss&&Array.isArray(previous.help_requested_for)?previous.help_requested_for.filter(name=>['Hibari','Souji'].includes(name)):[],
+      help_requested_at:sameBoss?finite(previous.help_requested_at):null
+    };
+    row.schema=BUS_SCHEMA;
+    row.sequence=sequence;
+    row.mission=clone(mission);
+    row.updated_at=at;
+    lastSeenSequence=sequence;
+    writeTransport(mission);
+    return{ok:true,mission:clone(mission)};
+  }
+
+  function requestHelp({targets=['Hibari','Souji'],requester='Harutora'}={}){
+    if(String(requester)!=='Harutora')
+      return{ok:false,error:'BOSS_HELP_REQUEST_REQUIRES_MAGE'};
+    const row=bus(),mission=validMission(row.mission)?row.mission:null;
+    if(!mission)return{ok:false,error:'NO_ACTIVE_BOSS_TO_CALL_FOR_HELP'};
+    const requested=Array.isArray(targets)?targets.filter(name=>['Hibari','Souji'].includes(String(name))).map(String):[];
+    if(!requested.length)return{ok:false,error:'BOSS_HELP_TARGETS_REQUIRED'};
+    mission.help_requested_for=[...new Set([...(mission.help_requested_for||[]),...requested])];
+    mission.help_requested_at=Number(now());
+    mission.lease_until=Math.max(Number(mission.lease_until),Number(now())+leaseMs);
+    row.mission=clone(mission);
+    row.updated_at=Number(now());
+    writeTransport(mission);
+    return{ok:true,mission:clone(mission)};
+  }
+
+  function markWarriorStarted(targetId,mtype=''){
+    const row=bus();
+    const mission=validMission(row.mission)?row.mission:null;
+    if(!mission)return{ok:false,error:'BOSS_MISSION_NOT_ACTIVE'};
+
+    const id=String(targetId||'');
+    const type=String(mtype||mission.mtype||'');
+    const missionId=String(mission.boss_id||'');
+
+    if(missionId&&id&&missionId!==id){
+      return{ok:false,error:'BOSS_MISSION_ID_MISMATCH',mission:clone(mission)};
+    }
+    if(type&&mission.mtype&&String(mission.mtype)!==type){
+      return{ok:false,error:'BOSS_MISSION_MTYPE_MISMATCH',mission:clone(mission)};
+    }
+
+    const at=Number(now());
+    mission.warrior_started_boss_id=id||missionId||null;
+    mission.warrior_started_at=at;
+    mission.warrior_started_by='Hibari';
+    mission.lease_until=Math.max(Number(mission.lease_until||0),at+leaseMs);
+    row.mission=clone(mission);
+    row.updated_at=at;
+    writeTransport(mission);
+    return{ok:true,mission:clone(mission)};
+  }
+
+  function explicitMission(ctx={}){
+    const raw=ctx.bossMission&&typeof ctx.bossMission==='object'?ctx.bossMission:
+      ctx.worldBoss&&typeof ctx.worldBoss==='object'?ctx.worldBoss:null;
+    if(raw){
+      const mtype=String(raw.mtype||raw.type||ctx.bossMtype||'');
+      const bossId=String(raw.boss_id||raw.id||raw.target||ctx.bossTarget||ctx.bossId||'');
+      if((mtype&&BOSS_SET.has(mtype))||bossId){
+        return{
+          boss_id:bossId,
+          mtype:mtype&&BOSS_SET.has(mtype)?mtype:'',
+          map:String(raw.map||ctx.map||''),
+          instance:String(raw.instance||raw.in||ctx.instance||''),
+          x:finite(raw.x),y:finite(raw.y)
+        };
+      }
+    }
+    if(ctx.worldBoss===true&&(ctx.bossTarget||ctx.bossId||ctx.bossMtype)){
+      const mtype=String(ctx.bossMtype||'');
+      return{
+        boss_id:String(ctx.bossTarget||ctx.bossId||''),
+        mtype:mtype&&BOSS_SET.has(mtype)?mtype:'',
+        map:String(ctx.map||''),instance:String(ctx.instance||''),
+        x:finite(ctx.bossX),y:finite(ctx.bossY)
+      };
+    }
+    return null;
+  }
+
+  function serverHalloweenMission(ctx={}){
+    if(roleName!=='MAGE')return null;
+    const table=
+      ctx.serverStatus&&typeof ctx.serverStatus==='object'?ctx.serverStatus:
+      ctx.server&&ctx.server.status&&typeof ctx.server.status==='object'?ctx.server.status:
+      ctx.parentS&&typeof ctx.parentS==='object'?ctx.parentS:
+      root&&root.server&&root.server.status&&typeof root.server.status==='object'?root.server.status:
+      root&&root.parent&&root.parent.S&&typeof root.parent.S==='object'?root.parent.S:
+      root&&root.S&&typeof root.S==='object'?root.S:null;
+
+    for(const mtype of ['mrgreen','mrpumpkin']){
+      const row=table&&table[mtype];
+      if(!row||typeof row!=='object')continue;
+      if(row.live!==true||row.active===false||row.dead===true||row.ended===true)continue;
+      const x=finite(row.real_x!==undefined?row.real_x:row.x);
+      const y=finite(row.real_y!==undefined?row.real_y:row.y);
+      return{
+        boss_id:String(row.id||''),
+        mtype,
+        map:String(row.map||(mtype==='mrgreen'?'spookytown':'halloween')),
+        instance:String(row.in||row.instance||''),
+        x,y,
+        rally_mode:mtype==='mrgreen'?'MAGE_MAGIPORT':'LOCAL_NO_FORCED_MAGIPORT'
+      };
+    }
+    return null;
+  }
+
+  function visibleMission(ctx={}){
+    const entities=ctx.entities&&typeof ctx.entities==='object'?ctx.entities:{};
+    const rows=[];
+    for(const [id,row] of Object.entries(entities)){
+      if(!activeMonster(row))continue;
+      const identity=bossIdentity(row,id);
+      if(!identity)continue;
+      if(identity.distance>radius)continue;
+      rows.push(identity);
+    }
+    rows.sort((a,b)=>a.distance-b.distance||String(a.boss_id).localeCompare(String(b.boss_id)));
+    return rows[0]||null;
+  }
+
+  function observe(ctx={}){
+    const serverHalloween=serverHalloweenMission(ctx);
+    if(serverHalloween){
+      lastLocalObservation=clone(serverHalloween);
+      const type=String(serverHalloween.mtype||'').toUpperCase();
+      return publish(serverHalloween,{
+        source:'SERVER_EVENT_'+type,
+        reason:'EVENT_BOSS_SERVER_NOTIFICATION'
+      });
+    }
+
+    const explicit=explicitMission(ctx);
+    if(explicit){
+      lastLocalObservation=clone(explicit);
+      return publish(explicit,{source:'EXPLICIT_BOSS_MISSION',reason:'EXPLICIT_BOSS'});
+    }
+    const visible=visibleMission(ctx);
+    if(visible){
+      lastLocalObservation=clone(visible);
+      return publish(visible,{source:'VISIBLE_BOSS_200',reason:'BOSS_WITHIN_200'});
+    }
+    return{ok:true,mission:current(),published:false};
+  }
+
+  function shouldActivate(ctx={}){
+    const observed=observe(ctx);
+    const mission=observed&&observed.mission&&validMission(observed.mission)?observed.mission:current();
+    return{
+      active:!!mission,
+      mission:clone(mission),
+      source:mission?String(mission.source||'SHARED_BUS'):null,
+      lease_ms:mission?Math.max(0,Number(mission.lease_until)-Number(now())):0
+    };
+  }
+
+  function status(){
+    const mission=current();
+    return{
+      schema:BUS_SCHEMA,
+      key:BUS_KEY,
+      character,
+      role:roleName,
+      active:!!mission,
+      mission:clone(mission),
+      last_local_observation:clone(lastLocalObservation),
+      ttl_ms:leaseMs,
+      activation_radius:radius,
+      transport:transport?'SHARED_FRAME_PLUS_ADAPTER':'SHARED_FRAME'
+    };
+  }
+
+  async function health(){return{ok:true,...status()};}
+
+  return{observe,shouldActivate,current,publish,requestHelp,markWarriorStarted,status,health};
+}
+
+module.exports={
+  BUS_KEY,
+  BUS_SCHEMA,
+  DEFAULT_TTL_MS,
+  DEFAULT_ACTIVATION_RADIUS,
+  createBossMissionCoordinator
+};
+
+},{"./ScanBossState":"organs/bosses/ScanBossState.js"}],
+"organs/bosses/BossPolicy.js":[function(require,module,exports){
+'use strict';
+
+const OFFICIAL_SOURCE=Object.freeze({
+  repository:'kaansoral/adventureland_mongodb',
+  commit:'ddcf7222c3264f1404382e1ff5dea8e73f6cb4b4',
+  monsters:'design/monsters.js',
+  maps:'design/maps.js'
+});
+
+const SKELETOR=Object.freeze({
+  mtype:'skeletor',
+  displayName:'Skeletor',
+  map:'arena',
+  namedDestination:'skeletor',
+  pvpMap:true,
+  hp:80000,
+  attack:1800,
+  damageType:'physical',
+  respawnMs:16*60*1000,
+  spawnCenter:Object.freeze({x:380,y:-672}),
+  firstRoutePolicy:'SMART_MOVE_NAMED_ONCE_THEN_LEARNED_ROUTE',
+  postPvpPolicy:'RESUME_EXISTING_BOSS_IF_STILL_PRESENT'
+});
+
+function bossDefinition(mtype){
+  return String(mtype||'')===SKELETOR.mtype?SKELETOR:null;
+}
+function travelIntent({mtype,hasNamedTeachingProof=false}={}){
+  const boss=bossDefinition(mtype);
+  if(!boss)return{ok:false,error:'BOSS_UNKNOWN'};
+  if(!hasNamedTeachingProof){
+    return{ok:true,kind:'SMART_MOVE_NAMED',target:boss.namedDestination,recordMovement:true,oneTime:true};
+  }
+  return{ok:true,kind:'LEARNED_ROUTE',target:{map:boss.map,...boss.spawnCenter},recordMovement:true};
+}
+function objectivePriority({pvpDefenseActive=false,bossVisible=false,bossAlive=false}={}){
+  if(pvpDefenseActive)return{state:'PVP_DEFENSE',preempts:'BOSS'};
+  if(bossVisible&&bossAlive)return{state:'BOSS_PVE',mtype:SKELETOR.mtype};
+  return{state:'NORMAL_PVE'};
+}
+
+module.exports={OFFICIAL_SOURCE,SKELETOR,bossDefinition,travelIntent,objectivePriority};
+
+},{}],
+"organs/bosses/HalloweenSummonPolicy.js":[function(require,module,exports){
+'use strict';
+// Shared Halloween summon policy. Pure decisions: no movement ownership.
+const WAVES=Object.freeze({mrpumpkin:Object.freeze({add:'jr',thresholds:[.75,.50,.25],count:5}),mrgreen:Object.freeze({add:'greenjr',thresholds:[.75,.50,.25],count:5})});
+function decide({boss=null,entities=[],role='',warriorPresent=false,healerPresent=false,characterHpRatio=1,partyMinHpRatio=1}={}){
+ const type=String(boss&&boss.mtype||'').toLowerCase();
+ const wave=WAVES[type];
+ if(!wave||!boss||boss.dead||boss.rip)return {active:false,reason:'NO_HALLOWEEN_BOSS'};
+ const matching=(Array.isArray(entities)?entities:Object.values(entities||{})).filter(m=>m&&m.type==='monster'&&!m.dead&&!m.rip&&m.visible!==false&&String(m.mtype||'').toLowerCase()===wave.add);
+ matching.sort((a,b)=>Number(a.hp||0)-Number(b.hp||0));
+ const hp=Number(boss.hp||0),max=Number(boss.max_hp||0),ratio=max>0?hp/max:null;
+ const next=ratio===null?null:wave.thresholds.find(t=>ratio>t)||null;
+ const roleName=String(role).toLowerCase();
+ if(roleName==='priest')return {active:true,phase:matching.length?'ADD_HEAL_LOCK':'BOSS_HEAL',healingPriority:true,attackAllowed:matching.length===0&&partyMinHpRatio>=.85,addType:wave.add,adds:matching.length,nextThreshold:next};
+ if(!['warrior','mage'].includes(roleName))return {active:true,phase:'NO_COMBAT_OWNER',attackAllowed:false,addType:wave.add};
+ if(!warriorPresent||!healerPresent||characterHpRatio<.45||partyMinHpRatio<.55)return {active:true,phase:'SAFETY_HOLD',attackAllowed:false,reason:'PARTY_SAFETY',addType:wave.add};
+ return {active:true,phase:matching.length?'CLEAR_ADDS':'FIGHT_BOSS',attackAllowed:true,focusId:matching.length?matching[0].id||null:boss.id||null,focusType:matching.length?wave.add:type,addType:wave.add,adds:matching.length,nextThreshold:next};
+}
+module.exports={WAVES,decide};
+
+},{}],
+"organs/bosses/ScanBossState.js":[function(require,module,exports){
+'use strict';
+
+const OFFICIAL_SOURCE=Object.freeze({
+  repository:'kaansoral/adventureland_mongodb',
+  commit:'90052162eb3ebda36c893e1eb4af643913c8f984',
+  runner:'js/runner_functions.js',
+  monsters:'design/monsters.js'
+});
+
+const {decide:decideHalloweenSummons}=require('./HalloweenSummonPolicy');
+
+const BOSS_MTYPES=Object.freeze([
+  'phoenix','mvampire','jr','greenjr','goldenbat','franky','pinkgoblin',
+  'snowman','wabbit','slenderman','mrgreen','mrpumpkin','cutebee','fvampire',
+  'grinch','dragold','tiger','pinkgoo','icegolem','skeletor'
+]);
+const EVENT_BOSS_MTYPES=Object.freeze([
+  'goldenbat','franky','pinkgoblin','snowman','wabbit','slenderman',
+  'mrgreen','mrpumpkin','cutebee','grinch','dragold','tiger','pinkgoo','icegolem'
+]);
+const BOSS_SET=new Set(BOSS_MTYPES);
+const EVENT_BOSS_SET=new Set(EVENT_BOSS_MTYPES);
+const clone=value=>value==null?value:JSON.parse(JSON.stringify(value));
+
+function createScanBossState({characterName='',role='',now=Date.now,visibleTtlMs=45000,serverTtlMs=12000}={}){
+  const name=String(characterName||'');
+  const classRole=String(role||'').toLowerCase();
+  const primaryScout=name==='Rentaro'||classRole==='merchant';
+  const state={
+    version:3,
+    state:'SCAN_BOSS',
+    runtimeConnected:false,
+    character:name,
+    role:String(role||''),
+    primaryScout,
+    priority:primaryScout?'PRIMARY':'SECONDARY',
+    movementIndependent:true,
+    actionOwner:false,
+    detections:{},
+    scans:0,
+    lastScanAt:null,
+    lastDetectionAt:null,
+    lastError:null
+  };
+
+  const snapshot=()=>clone(state);
+  const isBoss=mtype=>BOSS_SET.has(String(mtype||''));
+  function activeStatus(row){
+    if(!row||typeof row!=='object')return false;
+    if(row.active===false||row.live===false||row.dead===true||row.ended===true)return false;
+    return true;
+  }
+  function record(row){
+    if(!row||!row.key)return;
+    const at=Number(now());
+    state.detections[row.key]=Object.assign({},state.detections[row.key]||{},clone(row),{lastSeenAt:at});
+    state.lastDetectionAt=at;
+  }
+  function prune(){
+    const at=Number(now());
+    for(const key of Object.keys(state.detections)){
+      const row=state.detections[key];
+      const ttl=row&&row.source==='SERVER_STATUS'?Number(serverTtlMs):Number(visibleTtlMs);
+      if(!row||at-Number(row.lastSeenAt||0)>ttl)delete state.detections[key];
+    }
+  }
+  function observe({entities={},serverStatus={},map='',instance='',moving=false,smartMoving=false}={}){
+    try{
+      state.scans++;
+      state.lastScanAt=Number(now());
+      state.lastError=null;
+      state.moving=!!moving;
+      state.smartMoving=!!smartMoving;
+
+      for(const id of Object.keys(entities||{})){
+        const mob=entities[id];
+        if(!mob||mob.type!=='monster'||mob.dead||mob.rip||mob.visible===false)continue;
+        const mtype=String(mob.mtype||'');
+        if(!isBoss(mtype))continue;
+        record({
+          key:'entity:'+String(mob.id||id),source:'VISIBLE_ENTITY',id:String(mob.id||id),mtype,
+          map:String(map||mob.map||''),instance:String(instance||mob.in||''),
+          x:Number(mob.real_x!==undefined?mob.real_x:mob.x||0),
+          y:Number(mob.real_y!==undefined?mob.real_y:mob.y||0),
+          hp:Number(mob.hp||0),maxHp:Number(mob.max_hp||0),
+          target:mob.target==null?null:String(mob.target)
+        });
+      }
+
+      for(const key of Object.keys(serverStatus||{})){
+        const row=serverStatus[key];
+        const mtype=isBoss(key)?String(key):String(row&&row.mtype||row&&row.type||'');
+        if(!isBoss(mtype)||!activeStatus(row))continue;
+        record({
+          key:'server:'+mtype,source:'SERVER_STATUS',mtype,
+          id:row&&row.id!=null?String(row.id):null,
+          map:String(row&&row.map||''),
+          x:Number(row&&row.x||0),y:Number(row&&row.y||0)
+        });
+      }
+      prune();
+      return{ok:true,status:snapshot()};
+    }catch(error){
+      state.lastError=String(error&&error.message||error);
+      return{ok:false,error:state.lastError,status:snapshot()};
+    }
+  }
+  function sideValue(){
+    prune();
+    return{
+      phase:'SCANNING',
+      primaryScout:state.primaryScout,
+      priority:state.priority,
+      movementIndependent:true,
+      moving:!!state.moving,
+      smartMoving:!!state.smartMoving,
+      detections:Object.values(state.detections).map(clone),
+      lastScanAt:state.lastScanAt,
+      lastDetectionAt:state.lastDetectionAt,
+      lastError:state.lastError
+    };
+  }
+  function syncStateEngine(engine,{reason='BOSS_SCAN_OBSERVATION'}={}){
+    if(!engine||typeof engine.setSide!=='function')return{ok:false,error:'STATE_ENGINE_REQUIRED'};
+    return engine.setSide('SCAN_BOSS',sideValue(),{owner:'SCAN_BOSS',reason});
+  }
+
+  // V3 combat state may query this side-effect-free decision; SCAN_BOSS never attacks or moves.
+  const halloweenDecision=(input={})=>decideHalloweenSummons(input);
+  return{observe,sideValue,syncStateEngine,getStatus:snapshot,isBossMtype:isBoss,halloweenDecision};
+}
+
+module.exports={OFFICIAL_SOURCE,BOSS_MTYPES,EVENT_BOSS_MTYPES,createScanBossState};
+
+},{"./HalloweenSummonPolicy":"organs/bosses/HalloweenSummonPolicy.js"}],
+"organs/bosses/WorldBossState.js":[function(require,module,exports){
+'use strict';
+
+const {STATES}=require('../../states/StateRegistry');
+const {EVENT_BOSS_MTYPES}=require('./ScanBossState');
+const {planMagiport}=require('../../characters/mage/Spells');
+const {planPartyTaunt}=require('../../characters/warrior/Spells');
+
+const EVENT_BOSS_SET=new Set(EVENT_BOSS_MTYPES.map(String));
+
+function clone(value){return value==null?value:JSON.parse(JSON.stringify(value));}
+function finite(value,fallback=null){const n=Number(value);return Number.isFinite(n)?n:fallback;}
+
+function createWorldBossState({
+  character='',
+  role='',
+  missions,
+  targeting,
+  combat,
+  movement=null,
+  fighter=null,
+  stand=null,
+  config={}
+}={}){
+  if(!missions||typeof missions.shouldActivate!=='function')throw new Error('WORLD_BOSS_MISSIONS_REQUIRED');
+  if(!targeting||typeof targeting.observe!=='function'||typeof targeting.acquire!=='function')throw new Error('WORLD_BOSS_TARGETING_REQUIRED');
+  if(!combat||typeof combat.acquire!=='function'||typeof combat.attack!=='fun
