@@ -1,0 +1,1543 @@
+ports={createMerchantController};
+
+},{"../../states/StateRegistry":"states/StateRegistry.js"}],
+"characters/priest/PriestController.js":[function(require,module,exports){
+'use strict';
+
+// Farm fallback when Souji's independent healing heartbeat is unavailable.
+// Heal always comes before any attack or farm movement. Live skill readiness
+// overrides empty (not yet observed) CooldownService entries.
+function createPriestController({party,cooldowns,character='Souji',farDistance=50}={}){
+  if(!party||!cooldowns)throw new Error('PRIEST_SERVICES_REQUIRED');
+  const name=String(character||'Souji');
+  const finite=v=>typeof v==='number'&&Number.isFinite(v);
+  function ready(skill,ctx={}){
+    if(typeof ctx.skillReady==='function'){
+      const live=ctx.skillReady(skill);
+      if(live===true||live===false)return live;
+    }
+    return cooldowns.status(skill).ready===true;
+  }
+  function distance(a,b){
+    if(!a||!b||![a.x,a.y,b.x,b.y].every(finite))return Infinity;
+    return Math.hypot(a.x-b.x,a.y-b.y);
+  }
+  function plan(ctx={}){
+    const rows=party.status();
+    const live=rows.filter(m=>(m.online===true||
+      (m.rosterOnline===true&&m.healthFromPartyRoster===true))&&
+      m.dead!==true&&m.rip!==true&&
+      finite(m.hp)&&finite(m.max_hp)&&m.max_hp>0&&m.hp>0&&
+      (!finite(m.age_ms)||m.age_ms<=5000));
+    if(!live.length)return{ok:true,action:null,reason:'NO_LIVE_PARTY'};
+    const priest=live.find(m=>m.name===name);
+    const injured=live.filter(m=>m.hp/m.max_hp<1)
+      .sort((a,b)=>(a.hp/a.max_hp)-(b.hp/b.max_hp));
+    const multiLow=live.filter(m=>m.hp/m.max_hp<0.72).length>=2;
+    // A remote party member has no targetable entity, but their official
+    // party-roster HP can still request untargeted partyheal.
+    const farInjured=priest&&injured.find(m=>m.name!==name&&(
+      m.healthFromPartyRoster===true||
+      m.map!==priest.map||
+      String(m.instance||'')!==String(priest.instance||'')||
+      distance(priest,m)>=farDistance));
+    if((farInjured||multiLow)&&ready('partyheal',ctx)){
+      return{ok:true,action:{kind:'USE_SKILL',skill:'partyheal',owner:'PRIEST_COMBAT'},
+        reason:farInjured?'DISTANT_INJURED_PARTY_MEMBER':'MULTI_MEMBER_LOW'};
+    }
+    const lowest=injured.find(m=>m.name===name||(m.online===true&&
+      (!priest||(m.map===priest.map&&
+       String(m.instance||'')===String(priest.instance||'')))));
+    if(lowest&&ready('heal',ctx)){
+      return{ok:true,action:{kind:'USE_SKILL',skill:'heal',target:String(lowest.name),
+        owner:'PRIEST_COMBAT'},reason:'LOWEST_MEMBER'};
+    }
+    if(ctx.frankyMummyTarget&&ready('attack',ctx)){
+      return{ok:true,action:{kind:'ATTACK',target:String(ctx.frankyMummyTarget),
+        owner:'PRIEST_COMBAT'},reason:'FRANKY_MUMMY_PRIORITY'};
+    }
+    return{ok:true,action:null,reason:injured.length?'HEAL_SKILLS_NOT_READY':'PARTY_STABLE'};
+  }
+  async function health(){
+    const self=party.get(name);
+    if(!self)return{ok:true,ready:false,reason:'PARTY_SNAPSHOT_PENDING',self:null};
+    return{
+      ok:true,ready:self.online===true&&self.dead!==true&&self.rip!==true,
+      reason:self.online!==true?'OFFLINE':(self.dead===true||self.rip===true?'DEAD':'READY'),self
+    };
+  }
+  return{plan,health};
+}
+module.exports={createPriestController};
+
+},{}],
+"characters/priest/PriestHealingHeartbeat.js":[function(require,module,exports){
+'use strict';
+
+// Souji's independent, always-on healing lane. Starts before First State,
+// navigation, Farm, or World Boss and remains active across state changes.
+// Reads the live party on EVERY tick, including the first tick after party
+// join. Does not route movement, attack, or depend on Bridge receipts.
+const ROLES=new Set(['Souji','Hibari','Harutora','Rentaro']);
+function finite(x){return typeof x==='number'&&Number.isFinite(x);}
+function point(row){
+  if(!row)return null;
+  const x=row.real_x??row.x,y=row.real_y??row.y;
+  return finite(x)&&finite(y)?{x,y}:null;
+}
+function distance(a,b){
+  const x=point(a),y=point(b);
+  return x&&y?Math.hypot(x.x-y.x,x.y-y.y):Infinity;
+}
+function fraction(row){return finite(row?.hp)&&finite(row?.max_hp)&&row.max_hp>0?row.hp/row.max_hp:Infinity;}
+
+function createPriestHealingHeartbeat({
+  root,now=Date.now,intervalMs=350,
+  farDistance=50,healBelow=1,criticalBelow=0.72,
+  minRetryMs=750,failedRetryMs=1400,
+  setIntervalFn=setInterval,clearIntervalFn=clearInterval
+}={}){
+  if(!root||typeof root!=='object')throw Error('PRIEST_HEAL_FRAME_REQUIRED');
+  if(!finite(farDistance)||farDistance<0)throw Error('PRIEST_HEAL_DISTANCE_INVALID');
+  if(!finite(healBelow)||healBelow<=0||healBelow>1)throw Error('PRIEST_HEAL_THRESHOLD_INVALID');
+  let timer=null,inFlight=false,stopped=false,last=null,lastSkillAt=-Infinity,
+    casts=0,errors=0,ticks=0,readyForParty=false,previousMembers='',partyHealth=[];
+  const current=()=>root.character&&root.character.name==='Souji'?root.character:null;
+  function liveParty(){
+    const self=current();
+    if(!self)return{self:null,rows:[],joined:false};
+    const getter=typeof root.get_party==='function'?root.get_party.bind(root):null;
+    let members={};
+    try{members=getter?getter()||{}:root.parent?.party||{};}catch{members={};}
+    const names=[...new Set(['Souji',...Object.keys(members).filter(name=>ROLES.has(name))])];
+    const rows=[];
+    for(const name of names){
+      let visible=null;
+      if(name==='Souji')visible=self;
+      else{
+        try{visible=typeof root.get_player==='function'?root.get_player(name):null;}catch{}
+        if(!visible){
+          try{visible=root.parent?.entities?.[name]||root.entities?.[name]||null;}catch{}
+        }
+      }
+      const cached=name==='Souji'?null:members[name]||null;
+      // The party roster carries HP for off-screen members. Do not discard
+      // Harutora simply because he left Souji's visible map or went to a boss.
+      // Local visibility is needed for *targeted* heal, not for partyheal.
+      const local=!!visible&&(name==='Souji'||(
+        (visible.map||self.map)===self.map&&
+        String(visible.in??visible.instance??self.in??self.instance??'')===
+          String(self.in??self.instance??'')));
+      const valid=row=>!!row&&row.dead!==true&&row.rip!==true&&
+        row.online!==false&&finite(row.hp)&&finite(row.max_hp)&&
+        row.max_hp>0&&row.hp>0;
+      const sampled=local&&valid(visible)?visible:
+        valid(cached)?cached:null;
+      if(!sampled)continue;
+      const localTarget=local&&sampled===visible;
+      const hp=sampled.hp,maxHp=sampled.max_hp;
+      rows.push({name,entity:localTarget?visible:null,cached,
+        hp,maxHp,ratio:hp/maxHp,
+        map:sampled.map||null,
+        source:localTarget?'VISIBLE':'PARTY_ROSTER',
+        remote:!localTarget,
+        distance:localTarget?distance(self,visible):Infinity});
+    }
+    return{self,rows,joined:names.some(name=>name!=='Souji')};
+  }
+  function skillReady(skill){
+    const c=current();
+    if(!c||c.rip===true||c.dead===true||!finite(c.hp)||c.hp<=0)return false;
+    try{
+      if(typeof root.can_use==='function'&&root.can_use(skill)===false)return false;
+      if(typeof root.is_on_cooldown==='function'&&root.is_on_cooldown(skill)===true)return false;
+    }catch{return false;}
+    const price=Number(root.G?.skills?.[skill]?.mp);
+    if(Number.isFinite(price)&&price>0&&finite(c.mp)&&c.mp<price)return false;
+    return typeof root.use_skill==='function';
+  }
+  function decide(view){
+    if(!view.self)return{reason:'PRIEST_NOT_PRESENT'};
+    if(root.socket&&root.socket.connected===false)return{reason:'PRIEST_SOCKET_OFFLINE'};
+    const injured=view.rows.filter(p=>p.ratio<healBelow).sort((a,b)=>a.ratio-b.ratio);
+    if(!injured.length)return{reason:'PARTY_HP_OK'};
+    const far=injured.find(p=>p.name!=='Souji'&&(p.remote===true||p.distance>=farDistance));
+    const multiLow=injured.filter(p=>p.ratio<criticalBelow).length>=2;
+    if((far||multiLow)&&skillReady('partyheal'))
+      return{skill:'partyheal',reason:far?'INJURED_MEMBER_AT_LEAST_50_AWAY':'MULTIPLE_LOW_MEMBERS',
+        target:far?.name||null,distance:far?.distance??null,remote:far?.remote===true};
+    const lowest=injured.find(p=>p.name==='Souji'||p.remote!==true);
+    if(lowest&&skillReady('heal'))
+      return{skill:'heal',reason:'LOWEST_INJURED_VISIBLE_MEMBER',target:lowest.name,
+        entity:lowest.entity,distance:lowest.distance};
+    return{reason:'HEAL_COOLDOWN_OR_TARGET_UNAVAILABLE'};
+  }
+  async function tick(){
+    ticks++;
+    if(stopped||inFlight)return{ok:true,progress:false,reason:stopped?'PRIEST_HEAL_STOPPED':'HEAL_IN_FLIGHT'};
+    const view=liveParty();
+    readyForParty=view.joined;
+    // Snapshot all health readings; full-HP members never terminate the scan.
+    partyHealth=view.rows.map(p=>({name:p.name,hp:p.hp,max_hp:p.maxHp,
+      ratio:p.ratio,remote:p.remote,source:p.source,map:p.map,
+      distance:Number.isFinite(p.distance)?p.distance:null}))
+      .sort((a,b)=>a.name.localeCompare(b.name));
+    const roster=view.rows.map(p=>p.name).sort().join(',');
+    const changed=roster!==previousMembers;previousMembers=roster;
+    const plan=decide(view);
+    if(!plan.skill){last={ok:true,progress:false,reason:plan.reason,joined:view.joined,changed};return last;}
+    const t=Number(now());
+    const retry=last&&last.ok===false?failedRetryMs:minRetryMs;
+    if(t-lastSkillAt<retry)return{ok:true,progress:false,reason:'HEAL_CAST_THROTTLED'};
+    inFlight=true;
+    lastSkillAt=t;
+    try{
+      // Partyheal has no target. Single heal receives a live character entity.
+      const result=plan.skill==='partyheal'?await root.use_skill('partyheal'):
+        await root.use_skill('heal',plan.entity);
+      const ok=result!==false&&!(result&&result.failed===true||result&&result.ok===false);
+      if(ok)casts++;else errors++;
+      last={ok,progress:ok,skill:plan.skill,target:plan.target,distance:plan.distance,
+        remoteTarget:plan.remote===true,
+        remoteEffectVerified:plan.remote===true?false:null,
+        reason:ok?'PRIEST_HEAL_CAST': 'PRIEST_HEAL_NATIVE_REJECTED',joined:view.joined,changed};
+      return last;
+    }catch(error){
+      errors++;
+      last={ok:false,progress:false,reason:'PRIEST_HEAL_SKILL_THROW',
+        error:String(error&&error.message||error),skill:plan.skill,joined:view.joined};
+      return last;
+    }finally{inFlight=false;}
+  }
+  function start(){
+    if(stopped)return{ok:false,reason:'HEAL_HEARTBEAT_STOPPED'};
+    if(timer!==null)return{ok:true,alreadyRunning:true};
+    // Initiate live party HP reading and healing before any other role work.
+    void tick();
+    timer=setIntervalFn(()=>{void tick();},Math.max(200,Number(intervalMs)||350));
+    return{ok:true,started:true};
+  }
+  function stop(){
+    if(timer!==null)clearIntervalFn(timer);
+    timer=null;stopped=true;
+    return{ok:true};
+  }
+  function status(){return{running:timer!==null,firstCheckDone:ticks>0,ticks,
+    inFlight,casts,errors,partySeen:readyForParty,
+    partyHealth:partyHealth.map(p=>({...p})),last:last?{...last}:null};}
+  return{tick,start,stop,status,liveParty,decide};
+}
+module.exports={createPriestHealingHeartbeat};
+
+},{}],
+"characters/warrior/FarmRotation.js":[function(require,module,exports){
+'use strict';
+
+const {SKILLS}=require('../../core/contracts/AdventureLandContract');
+
+const WARRIOR_FARM_ROTATION=Object.freeze({
+  owner:'WARRIOR_FARM_ROTATION',
+  phases:Object.freeze([
+    'WAIT_HEALER',
+    'ATTACK_HEARTBEAT',
+    'CLEAVE_PREP',
+    'CLEAVE_BURST',
+    'SUGAR_PREP',
+    'SUGAR_WAIT_PROC',
+    'SUGAR_BURN',
+    'LOADOUT_RECOVER'
+  ]),
+  cleave:Object.freeze({
+    skill:'cleave',
+    mp:Number(SKILLS.cleave&&SKILLS.cleave.mp||720),
+    cooldown:Number(SKILLS.cleave&&SKILLS.cleave.cooldown||1200),
+    minimumBurstCasts:2,
+    maximumBurstCasts:3
+  }),
+  reserve:Object.freeze({
+    tauntMp:Number(SKILLS.taunt&&SKILLS.taunt.mp||40),
+    stompMp:Number(SKILLS.stomp&&SKILLS.stomp.mp||120),
+    hardShellMp:Number(SKILLS.hardshell&&SKILLS.hardshell.mp||480),
+    agitateMp:Number(SKILLS.agitate&&SKILLS.agitate.mp||420),
+    attackBufferSwings:2,
+    attackBufferMinimumMp:100
+  }),
+  loadouts:Object.freeze({
+    CLEAVE:Object.freeze({
+      name:'CLEAVE',
+      clearSlots:Object.freeze(['offhand']),
+      mainhand:Object.freeze({name:'bataxe',selection:'HIGHEST_LEVEL'}),
+      offhand:null
+    }),
+    SUGAR_PREP:Object.freeze({
+      name:'SUGAR_PREP',
+      mainhand:Object.freeze({name:'vhammer',selection:'HIGHEST_LEVEL'}),
+      offhand:Object.freeze({name:'ololipop',minLevel:9,selection:'HIGHEST_LEVEL'})
+    }),
+    SUGAR_BURN:Object.freeze({
+      name:'SUGAR_BURN',
+      mainhand:Object.freeze({name:'vhammer',selection:'HIGHEST_LEVEL'}),
+      offhand:Object.freeze({name:'vhammer',selection:'HIGHEST_LEVEL',distinct:true})
+    })
+  })
+});
+
+function clampInt(value,min,max){
+  const n=Math.floor(Number(value)||0);
+  return Math.max(min,Math.min(max,n));
+}
+
+function calculateCleaveBudget({mp=0,basicAttackMp=0}={}){
+  const p=WARRIOR_FARM_ROTATION;
+  const attackBuffer=Math.max(
+    p.reserve.attackBufferMinimumMp,
+    Math.ceil(Math.max(0,Number(basicAttackMp)||0)*p.reserve.attackBufferSwings)
+  );
+  const safetySkills=
+    p.reserve.tauntMp+
+    p.reserve.stompMp+
+    Math.max(p.reserve.hardShellMp,p.reserve.agitateMp);
+  const reserveMp=safetySkills+attackBuffer;
+  const spendableMp=Math.max(0,Math.floor(Number(mp)||0)-reserveMp);
+  const safeCasts=clampInt(
+    Math.floor(spendableMp/p.cleave.mp),
+    0,
+    p.cleave.maximumBurstCasts
+  );
+  return{reserveMp,attackBuffer,safetySkills,spendableMp,safeCasts};
+}
+
+function normalAttack({target,attackReady=false,inRange=false,healerReady=false}={}){
+  target=String(target||'');
+  if(healerReady!==true)return null;
+  if(!target||attackReady!==true||inRange!==true)return null;
+  return{
+    kind:'ATTACK',
+    target,
+    owner:WARRIOR_FARM_ROTATION.owner,
+    priority:'BASIC_ATTACK_HEARTBEAT'
+  };
+}
+
+function planWarriorFarmRotation(input={}){
+  const target=String(input.target||'');
+  const healerReady=input.healerReady===true;
+  const attack=normalAttack({...input,target,healerReady});
+  const budget=calculateCleaveBudget(input);
+  const phase=String(input.phase||'CLEAVE_PREP');
+  const castsCompleted=clampInt(input.cleavesCompleted||0,0,WARRIOR_FARM_ROTATION.cleave.maximumBurstCasts);
+
+  if(!healerReady){
+    return{
+      ok:true,phase:'WAIT_HEALER',nextPhase:'WAIT_HEALER',
+      normalAttack:null,special:null,loadout:null,budget,
+      reason:'SOUJI_REQUIRED_FOR_FARM_COMBAT'
+    };
+  }
+
+  if(input.sugarRushActive===true){
+    return{
+      ok:true,phase:'SUGAR_BURN',nextPhase:'SUGAR_BURN',
+      normalAttack:attack,special:null,
+      loadout:WARRIOR_FARM_ROTATION.loadouts.SUGAR_BURN,
+      budget,reason:'SUGAR_RUSH_ACTIVE',
+      resetCleaveBurst:false
+    };
+  }
+
+  if(phase==='SUGAR_BURN'){
+    return{
+      ok:true,phase:'LOADOUT_RECOVER',nextPhase:'CLEAVE_PREP',
+      normalAttack:attack,special:null,
+      loadout:WARRIOR_FARM_ROTATION.loadouts.SUGAR_PREP,
+      budget,reason:'SUGAR_RUSH_ENDED',
+      resetCleaveBurst:true
+    };
+  }
+
+  if(phase==='SUGAR_PREP'||phase==='SUGAR_WAIT_PROC'||input.waitingForSugarProc===true){
+    return{
+      ok:true,phase:'SUGAR_WAIT_PROC',nextPhase:'SUGAR_WAIT_PROC',
+      normalAttack:attack,special:null,
+      loadout:WARRIOR_FARM_ROTATION.loadouts.SUGAR_PREP,
+      budget,reason:'BASIC_ATTACKS_PROC_SUGAR_RUSH',
+      resetCleaveBurst:false
+    };
+  }
+
+  const requestedTarget=clampInt(
+    input.burstTargetCasts||budget.safeCasts,
+    0,
+    WARRIOR_FARM_ROTATION.cleave.maximumBurstCasts
+  );
+  const burstTarget=castsCompleted>0
+    ? Math.max(castsCompleted,requestedTarget)
+    : (budget.safeCasts>=WARRIOR_FARM_ROTATION.cleave.minimumBurstCasts
+      ? Math.min(WARRIOR_FARM_ROTATION.cleave.maximumBurstCasts,budget.safeCasts)
+      : 0);
+
+  if(
+    burstTarget<WARRIOR_FARM_ROTATION.cleave.minimumBurstCasts ||
+    castsCompleted>=burstTarget ||
+    budget.safeCasts<=0
+  ){
+    return{
+      ok:true,phase:'SUGAR_PREP',nextPhase:'SUGAR_WAIT_PROC',
+      normalAttack:attack,special:null,
+      loadout:WARRIOR_FARM_ROTATION.loadouts.SUGAR_PREP,
+      budget,reason:castsCompleted>=burstTarget&&castsCompleted>0?'CLEAVE_BURST_COMPLETE':'CLEAVE_BUDGET_BELOW_TWO',
+      burstTargetCasts:burstTarget,
+      resetCleaveBurst:false
+    };
+  }
+
+  if(input.cleaveLoadoutReady!==true){
+    return{
+      ok:true,phase:'CLEAVE_PREP',nextPhase:'CLEAVE_BURST',
+      normalAttack:attack,special:null,
+      loadout:WARRIOR_FARM_ROTATION.loadouts.CLEAVE,
+      budget,reason:'PREPARE_BAT_AXE',
+      burstTargetCasts:burstTarget,
+      resetCleaveBurst:false
+    };
+  }
+
+  if(input.cleaveCooldownReady!==true){
+    return{
+      ok:true,phase:'CLEAVE_BURST',nextPhase:'CLEAVE_BURST',
+      normalAttack:attack,special:null,
+      loadout:WARRIOR_FARM_ROTATION.loadouts.CLEAVE,
+      budget,reason:'CLEAVE_COOLDOWN_BASIC_ATTACK_CONTINUES',
+      burstTargetCasts:burstTarget,
+      resetCleaveBurst:false
+    };
+  }
+
+  return{
+    ok:true,phase:'CLEAVE_BURST',nextPhase:'CLEAVE_BURST',
+    normalAttack:attack,
+    special:{
+      kind:'USE_SKILL',name:'cleave',target:null,
+      owner:WARRIOR_FARM_ROTATION.owner,
+      mp:WARRIOR_FARM_ROTATION.cleave.mp,
+      successProof:'SERVER_RESPONSE'
+    },
+    loadout:WARRIOR_FARM_ROTATION.loadouts.CLEAVE,
+    budget,
+    reason:'CLEAVE_READY',
+    burstTargetCasts:burstTarget,
+    cleavesCompletedAfterSuccess:castsCompleted+1,
+    executionOrder:attack?['ATTACK_IF_READY','CLEAVE']:['CLEAVE'],
+    resetCleaveBurst:false
+  };
+}
+
+module.exports={WARRIOR_FARM_ROTATION,calculateCleaveBudget,planWarriorFarmRotation};
+
+},{"../../core/contracts/AdventureLandContract":"core/contracts/AdventureLandContract.js"}],
+"characters/warrior/Spells.js":[function(require,module,exports){
+'use strict';
+
+const {SKILLS}=require('../../core/contracts/AdventureLandContract');
+
+const OFFICIAL_STOMP=SKILLS.stomp;
+const WARRIOR_SPELLS=Object.freeze({
+  STOMP:Object.freeze({
+    skill:'stomp',
+    category:'UTILITY_HIGH',
+    targetType:'SELF_AOE',
+    equipmentRequirement:'STOMP',
+    mp:OFFICIAL_STOMP.mp,
+    range:OFFICIAL_STOMP.range,
+    minimumLevel:OFFICIAL_STOMP.level,
+    cooldown:OFFICIAL_STOMP.cooldown,
+    duration:OFFICIAL_STOMP.duration,
+    requiredWtype:OFFICIAL_STOMP.wtype,
+    hpRatioTrigger:0.45,
+    attackerTrigger:5,
+    successProof:'SERVER_RESPONSE'
+  }),
+  TAUNT:Object.freeze({
+    skill:'taunt',
+    category:'UTILITY_HIGH',
+    targetType:'HOSTILE_TARGET',
+    mp:SKILLS.taunt.mp,
+    range:SKILLS.taunt.range,
+    cooldown:SKILLS.taunt.cooldown,
+    successProof:'SERVER_RESPONSE'
+  }),
+  AGITATE:Object.freeze({skill:'agitate',category:'UTILITY_HIGH',targetType:'SELF_AOE',mp:SKILLS.agitate.mp,range:SKILLS.agitate.range,cooldown:SKILLS.agitate.cooldown,successProof:'SERVER_RESPONSE'})
+});
+
+function evaluateStomp({cooldownReady=false,mp=0,level=Infinity,mobsNear=0,attackers=0,hpRatio=1}={}){
+  const spell=WARRIOR_SPELLS.STOMP;
+  if(Number(level)<spell.minimumLevel)return{eligible:false,reason:'LEVEL',equipmentRequirement:spell.equipmentRequirement};
+  if(!cooldownReady)return{eligible:false,reason:'COOLDOWN',equipmentRequirement:spell.equipmentRequirement};
+  if(Number(mp)<spell.mp)return{eligible:false,reason:'MP',equipmentRequirement:spell.equipmentRequirement,requiredMp:spell.mp};
+  if(Number(mobsNear)<=0)return{eligible:false,reason:'NO_TARGETS',equipmentRequirement:spell.equipmentRequirement};
+  const emergency=Number(hpRatio)<=spell.hpRatioTrigger||Number(attackers)>=spell.attackerTrigger;
+  if(!emergency)return{eligible:false,reason:'TRIGGER_NOT_MET',equipmentRequirement:spell.equipmentRequirement};
+  return{
+    eligible:true,reason:'EMERGENCY_STOMP',equipmentRequirement:spell.equipmentRequirement,
+    request:{owner:'WARRIOR_SPELL_STATE',category:spell.category,skill:spell.skill,targetType:spell.targetType,successProof:spell.successProof}
+  };
+}
+
+function planPartyTaunt({
+  target,
+  mp=0,
+  cooldownReady=false,
+  inRange=false,
+  partyEngaged=false,
+  warriorHasAggro=false,
+  targetIsMonster=true,
+  targetingPartyMember=false,
+  targetingPartyMemberName='',
+  targetingForeignPlayer=false,
+  claimHandoffAuthorized=false,
+  antiKsReclaimAuthorized=false,
+  targetIsBoss=false,
+  isFarmMob=false,
+  healerReady=false,
+  farmOwnershipAuthorized=false
+}={}){
+  const spell=WARRIOR_SPELLS.TAUNT;
+  target=String(target||''); if(!target)return{eligible:false,reason:'TARGET_REQUIRED'};
+  if(targetIsMonster!==true)return{eligible:false,reason:'MONSTER_TARGET_REQUIRED'};
+  if(warriorHasAggro===true)return{eligible:false,reason:'ALREADY_TANKED'};
+  const foreignReclaim=antiKsReclaimAuthorized===true&&targetingForeignPlayer===true&&targetIsBoss!==true;
+  if(targetingForeignPlayer===true&&!foreignReclaim)return{eligible:false,reason:'FOREIGN_TARGET_NOT_TAUNTABLE'};
+  if(antiKsReclaimAuthorized===true&&!foreignReclaim)return{eligible:false,reason:'ANTI_KS_FOREIGN_TARGET_REQUIRED'};
+  const farmClaim=isFarmMob===true&&farmOwnershipAuthorized===true&&healerReady===true&&targetIsBoss!==true&&targetingForeignPlayer!==true;
+  if(targetingPartyMember!==true&&!foreignReclaim&&!farmClaim)return{eligible:false,reason:'FRIENDLY_AGGRO_REQUIRED'};
+
+  const protectedBossRescue=
+    targetIsBoss===true &&
+    ['Harutora','Souji'].includes(String(targetingPartyMemberName||''));
+
+  if(targetIsBoss===true&&!protectedBossRescue){
+    return{eligible:false,reason:'BOSS_TAUNT_PROTECTED_PARTY_ONLY'};
+  }
+
+  if(claimHandoffAuthorized===true){
+    if(String(targetingPartyMemberName||'')!=='Harutora'){
+      return{eligible:false,reason:'CLAIM_OWNER_MISMATCH',expectedClaimOwner:'Harutora'};
+    }
+  }else if(partyEngaged!==true&&!protectedBossRescue&&!foreignReclaim&&!farmClaim){
+    return{eligible:false,reason:'PARTY_ENGAGEMENT_REQUIRED'};
+  }
+
+  if(!cooldownReady)return{eligible:false,reason:'COOLDOWN'};
+  if(Number(mp)<spell.mp)return{eligible:false,reason:'MP',requiredMp:spell.mp};
+  if(inRange!==true)return{eligible:false,reason:'RANGE'};
+
+  return{
+    eligible:true,
+    reason:foreignReclaim
+      ?'TAUNT_ANTI_KS_FOREIGN_RECLAIM'
+      :(claimHandoffAuthorized===true
+        ?'TAUNT_CONFIRMED_SPAWN_CLAIM'
+         :(protectedBossRescue?'TAUNT_BOSS_PROTECTED_PARTY':(farmClaim?'TAUNT_FARM_OWNERSHIP':'TAUNT_PARTY_TARGET'))),
+    request:{
+      owner:'WARRIOR_SPELL_STATE',
+      category:spell.category,
+      skill:'taunt',
+      target,
+      successProof:spell.successProof,
+      authorizationOwner:foreignReclaim?'ANTI_KS':(claimHandoffAuthorized===true?'TARGET_CLAIM':null),
+      claimHandoffAuthorized:claimHandoffAuthorized===true,
+      antiKsReclaimAuthorized:foreignReclaim
+    }
+  };
+}
+
+function planFarmAgitate({healerReady=false,isFarmMob=false,farmOwnershipAuthorized=false,agitateCooldownReady=false,mp=0,nearbyMobs=[]}={}){
+  const spell=WARRIOR_SPELLS.AGITATE;
+  if(healerReady!==true||isFarmMob!==true||farmOwnershipAuthorized!==true)return{eligible:false,reason:'FARM_HEALER_OR_AUTHORIZATION_REQUIRED'};
+  // Agitate is indiscriminate: NEVER cast if its range contains outsiders, bosses,
+  // non-hunt mobs, or a mob with unknown classification.
+  if(!Array.isArray(nearbyMobs)||!nearbyMobs.length)return{eligible:false,reason:'NEARBY_MOBS_REQUIRED'};
+  if(nearbyMobs.some(m=>!m||m.distance==null||!Number.isFinite(Number(m.distance))||Number(m.distance)<0))return{eligible:false,reason:'AGITATE_UNKNOWN_MOB_DISTANCE'};
+  const inRange=nearbyMobs.filter(m=>Number(m.distance)<=spell.range);
+  if(inRange.some(m=>m.isHuntMob!==true||m.isBoss===true||m.targetingForeignPlayer===true))return{eligible:false,reason:'AGITATE_UNSAFE_NEARBY_TARGET'};
+  const loose=inRange.filter(m=>m.warriorHasAggro!==true);
+  if(loose.length<2)return{eligible:false,reason:'PREFER_SINGLE_TAUNT'};
+  if(!agitateCooldownReady)return{eligible:false,reason:'COOLDOWN'};
+  if(Number(mp)<spell.mp)return{eligible:false,reason:'MP',requiredMp:spell.mp};
+  return{eligible:true,reason:'AGITATE_FARM_MULTIPLE_LOOSE_MOBS',request:{owner:'WARRIOR_SPELL_STATE',category:spell.category,skill:'agitate',targetType:'SELF_AOE',successProof:spell.successProof}};
+}
+
+module.exports={WARRIOR_SPELLS,evaluateStomp,planPartyTaunt,planFarmAgitate};
+
+},{"../../core/contracts/AdventureLandContract":"core/contracts/AdventureLandContract.js"}],
+"characters/warrior/WarriorController.js":[function(require,module,exports){
+'use strict';
+
+const {evaluateStomp,planPartyTaunt,planFarmAgitate}=require('./Spells');
+const {planWarriorFarmRotation}=require('./FarmRotation');
+
+function createWarriorController({party,character='Hibari'}={}){
+  if(!party||typeof party.get!=='function')throw new Error('WARRIOR_PARTY_SERVICE_REQUIRED');
+  const name=String(character||'Hibari');
+
+  function farmHealerReady(ctx={}){
+    if(ctx.isFarmMob!==true&&String(ctx.mainState||'')!=='FARM_MOB'){
+      return{ok:true,reason:'NOT_FARM_GATED'};
+    }
+    if(typeof party.ready==='function'){
+      return party.ready(['Souji'],{
+        anchor:name,
+        maxDistance:Number(ctx.healerMaxDistance||190),
+        sameMap:true,
+        sameInstance:true
+      });
+    }
+    const healer=party.get('Souji');
+    const ok=!!(healer&&healer.online===true&&healer.dead!==true&&healer.rip!==true);
+    return{ok,reason:ok?'READY':'SOUJI_NOT_READY',members:{Souji:healer||null}};
+  }
+
+  function plan(ctx={}){
+    const healer=farmHealerReady(ctx);
+    if(!healer.ok){
+      const rotation=planWarriorFarmRotation({...ctx,healerReady:false});
+      // No farm pull or attack without Souji; a single-target rescue may
+      // still defend a party member already under attack.
+      // Without Souji, only a verified named-party-member rescue can taunt.
+      // A generic targetingPartyMember flag must not create a new farm pull.
+      const rescueName=String(ctx.targetingPartyMemberName||'');
+      const rescueNamed=['Harutora','Souji','Rentaro'].includes(rescueName);
+      const rescue=planPartyTaunt({...ctx,isFarmMob:false,farmOwnershipAuthorized:false,healerReady:false,
+        cooldownReady:ctx.tauntCooldownReady===true,inRange:ctx.tauntInRange===true});
+      if(rescue.eligible&&ctx.targetingPartyMember===true&&rescueNamed){
+        return{ok:true,action:rescue.request,actions:[rescue.request],normalAttack:null,
+          reason:'EMERGENCY_PARTY_AGGRO_RESCUE',healer,rotation,taunt:rescue};
+      }
+      return{
+        ok:true,action:null,actions:[],normalAttack:null,
+        reason:'WARRIOR_FARM_REQUIRES_SOUJI',healer,rotation
+      };
+    }
+
+    const rotation=planWarriorFarmRotation({...ctx,healerReady:true});
+    const actions=[];
+    if(rotation.normalAttack)actions.push(rotation.normalAttack);
+
+    const farmMode=ctx.isFarmMob===true||String(ctx.mainState||'')==='FARM_MOB';
+    const agitate=planFarmAgitate({...ctx,isFarmMob:farmMode,healerReady:healer.ok});
+    // Rescue party members first. Farm ownership may claim even idle hunt mobs,
+    // but only with nearby Souji and explicit validated hunt classification.
+    const taunt=planPartyTaunt({
+      ...ctx,
+      isFarmMob:farmMode&&ctx.targetIsHuntMob===true,
+      farmOwnershipAuthorized:farmMode&&ctx.targetIsHuntMob===true&&ctx.farmOwnershipAuthorized===true,
+      healerReady:healer.ok,
+      cooldownReady:ctx.tauntCooldownReady===true,
+      inRange:ctx.tauntInRange===true
+    });
+    // Farm emergency crowd control takes precedence over routine single-target
+    // Taunt. Boss rescue stays separately protected by the existing boss rules.
+    const stomp=evaluateStomp(ctx);
+    if(stomp.eligible&&farmMode&&ctx.targetIsBoss!==true){
+      actions.push(stomp.request);
+      return{ok:true,action:stomp.request,actions,normalAttack:rotation.normalAttack,
+        executionOrder:rotation.normalAttack?['BASIC_ATTACK','STOMP']:['STOMP'],
+        reason:stomp.reason,healer,rotation,stomp,taunt};
+    }
+    if(taunt.eligible){
+      actions.push(taunt.request);
+      return{
+        ok:true,action:taunt.request,actions,normalAttack:rotation.normalAttack,
+        executionOrder:rotation.normalAttack?['BASIC_ATTACK','TAUNT']:['TAUNT'],
+        reason:taunt.reason,healer,rotation
+      };
+    }
+
+    if(stomp.eligible){
+      actions.push(stomp.request);
+      return{
+        ok:true,action:stomp.request,actions,normalAttack:rotation.normalAttack,
+        executionOrder:rotation.normalAttack?['BASIC_ATTACK','STOMP']:['STOMP'],
+        reason:stomp.reason,healer,rotation
+      };
+    }
+
+    if(agitate.eligible){
+      actions.push(agitate.request);
+      return{ok:true,action:agitate.request,actions,normalAttack:rotation.normalAttack,
+        executionOrder:rotation.normalAttack?['BASIC_ATTACK','AGITATE']:['AGITATE'],
+        reason:agitate.reason,healer,rotation,agitate,taunt};
+    }
+
+    if(rotation.special)actions.push(rotation.special);
+    return{
+      ok:true,
+      action:rotation.special||null,
+      actions,
+      normalAttack:rotation.normalAttack,
+      executionOrder:rotation.executionOrder||(
+        rotation.normalAttack&&rotation.special?['BASIC_ATTACK','ROTATION_SKILL']:
+        rotation.normalAttack?['BASIC_ATTACK']:
+        rotation.special?['ROTATION_SKILL']:[]
+      ),
+      reason:rotation.reason||taunt.reason||stomp.reason||'NO_ACTION',
+      healer,rotation,stomp,taunt
+    };
+  }
+
+  async function health(){
+    const self=party.get(name);
+    if(!self)return{ok:true,ready:false,reason:'PARTY_SNAPSHOT_PENDING',self:null};
+    return{
+      ok:true,
+      ready:self.online===true&&self.dead!==true&&self.rip!==true,
+      reason:self.online!==true?'OFFLINE':(self.dead===true||self.rip===true?'DEAD':'READY'),
+      self
+    };
+  }
+
+  return{plan,health,farmHealerReady};
+}
+
+module.exports={createWarriorController};
+
+},{"./Spells":"characters/warrior/Spells.js","./FarmRotation":"characters/warrior/FarmRotation.js"}],
+"core/alerts/AlertManager.js":[function(require,module,exports){
+'use strict';
+
+function clone(value){
+  return value == null ? value : JSON.parse(JSON.stringify(value));
+}
+
+function createAlertManager({sinks=[],now=Date.now}={}){
+  const activeSinks=Array.isArray(sinks)?sinks.filter(Boolean):[];
+
+  async function publish(alert={}){
+    const normalized={
+      id:String(alert.id||('v3-alert-'+Number(now()))),
+      kind:String(alert.kind||'V3_ALERT'),
+      event:String(alert.event||'INFO'),
+      severity:String(alert.severity||'info'),
+      title:String(alert.title||'PogiBrain V3'),
+      body:String(alert.body||''),
+      at:Number(alert.at||now()),
+      change_id:alert.change_id==null?null:String(alert.change_id),
+      area:alert.area==null?null:String(alert.area),
+      description:alert.description==null?null:String(alert.description),
+      requires_action:!!alert.requires_action,
+      data:clone(alert.data||{})
+    };
+
+    const deliveries=[];
+    for(const sink of activeSinks){
+      try{
+        const result=await sink.deliver(clone(normalized));
+        deliveries.push({sink:String(sink.name||'unnamed'),ok:!(result&&result.ok===false),result:clone(result||{})});
+      }catch(error){
+        deliveries.push({sink:String(sink.name||'unnamed'),ok:false,error:String(error&&error.message||error)});
+      }
+    }
+    return {
+      ok:deliveries.length===0 || deliveries.some(row=>row.ok),
+      alert:normalized,
+      deliveries
+    };
+  }
+
+  return {publish};
+}
+
+module.exports={createAlertManager};
+
+},{}],
+"core/change-verification/ChangeVerifier.js":[function(require,module,exports){
+'use strict';
+
+const SCHEMA_VERSION = 1;
+const FINAL_STATUSES = new Set(['VERIFIED','CODE_FAIL','LIVE_FAIL','CANCELLED','SUPERSEDED']);
+
+function clone(value){
+  return value == null ? value : JSON.parse(JSON.stringify(value));
+}
+
+function text(value,max=240){
+  return String(value == null ? '' : value).replace(/[\r\n]+/g,' ').trim().slice(0,max);
+}
+
+function deepMatch(expected,actual){
+  if(expected === undefined) return true;
+  if(expected === null || typeof expected !== 'object') return Object.is(actual,expected);
+  if(Array.isArray(expected)){
+    if(!Array.isArray(actual) || expected.length !== actual.length) return false;
+    return expected.every((value,index)=>deepMatch(value,actual[index]));
+  }
+  if(actual === null || typeof actual !== 'object' || Array.isArray(actual)) return false;
+  return Object.keys(expected).every(key=>deepMatch(expected[key],actual[key]));
+}
+
+function blankState(now){
+  return {
+    schema:SCHEMA_VERSION,
+    created_at:Number(now()),
+    updated_at:Number(now()),
+    changes:{}
+  };
+}
+
+function normalizeLive(live){
+  live = live && typeof live === 'object' ? live : {};
+  const required = live.required !== false;
+  return {
+    required,
+    signal:required ? text(live.signal,100) : null,
+    waiting_for:required ? text(live.waitingFor || live.waiting_for || 'matching live proof',240) : null,
+    trigger:required ? clone(live.trigger || {}) : null,
+    expect:required ? clone(live.expect || {}) : null
+  };
+}
+
+function createChangeVerifier({store,alertManager=null,now=Date.now}={}){
+  if(!store || typeof store.load !== 'function' || typeof store.save !== 'function'){
+    throw new Error('CHANGE_STORE_REQUIRED');
+  }
+
+  let statePromise = null;
+
+  async function loadState(){
+    if(!statePromise){
+      statePromise = Promise.resolve(store.load()).then(raw=>{
+        if(!raw || Number(raw.schema)!==SCHEMA_VERSION || !raw.changes || typeof raw.changes!=='object'){
+          return blankState(now);
+        }
+        return clone(raw);
+      });
+    }
+    return statePromise;
+  }
+
+  async function persist(state){
+    state.updated_at = Number(now());
+    await store.save(clone(state));
+    return state;
+  }
+
+  async function publish(change,event,extra={}){
+    if(!alertManager || typeof alertManager.publish!=='function') return null;
+    const severity = /FAIL/.test(event) ? 'error' : (/PASS|VERIFIED/.test(event) ? 'success' : 'info');
+    const title = event==='LIVE_PASS'
+      ? 'V3 live verification PASS'
+      : event==='LIVE_FAIL'
+        ? 'V3 live verification FAIL'
+        : event==='CODE_FAIL'
+          ? 'V3 code test FAIL'
+          : event==='VERIFIED'
+            ? 'V3 change VERIFIED'
+            : 'V3 live verification pending';
+    const bodyParts = [change.id, change.area, change.description].filter(Boolean);
+    if(event==='LIVE_PENDING' && change.live && change.live.waiting_for){
+      bodyParts.push('Waiting for: '+change.live.waiting_for);
+    }
+    if(extra.detail) bodyParts.push(text(extra.detail,300));
+    return alertManager.publish({
+      id:change.id+':'+event+':'+String(Number(now())),
+      kind:'V3_CHANGE_VERIFICATION',
+      event,
+      severity,
+      title,
+      body:bodyParts.join(' | '),
+      change_id:change.id,
+      area:change.area,
+      description:change.description,
+      at:Number(now()),
+      requires_action:event==='CODE_FAIL'||event==='LIVE_FAIL',
+      data:clone(extra)
+    });
+  }
+
+  function requireChange(state,id){
+    const key=text(id,100);
+    const change=state.changes[key];
+    if(!change) throw new Error('CHANGE_NOT_FOUND:'+key);
+    return change;
+  }
+
+  async function registerChange(spec={}){
+    const state=await loadState();
+    const id=text(spec.id,100);
+    if(!id) throw new Error('CHANGE_ID_REQUIRED');
+    if(state.changes[id]) throw new Error('CHANGE_ALREADY_EXISTS:'+id);
+
+    const live=normalizeLive(spec.live);
+    if(live.required && !live.signal) throw new Error('LIVE_SIGNAL_REQUIRED');
+
+    const createdAt=Number(now());
+    state.changes[id]={
+      id,
+      area:text(spec.area || 'UNSPECIFIED',100),
+      description:text(spec.description || id,300),
+      source_ref:text(spec.sourceRef || spec.source_ref || '',160) || null,
+      created_at:createdAt,
+      updated_at:createdAt,
+      status:'CREATED',
+      code_test:{status:'PENDING',detail:null,at:null},
+      live:{
+        required:live.required,
+        signal:live.signal,
+        waiting_for:live.waiting_for,
+        trigger:live.trigger,
+        expect:live.expect,
+        status:live.required ? 'WAITING_FOR_CODE_PASS' : 'NOT_REQUIRED',
+        started_at:null,
+        resolved_at:null,
+        actual:null,
+        detail:null
+      },
+      history:[{at:createdAt,status:'CREATED',detail:null}]
+    };
+    await persist(state);
+    return clone(state.changes[id]);
+  }
+
+  async function markCodeTest(id,{passed,detail=null}={}){
+    const state=await loadState();
+    const change=requireChange(state,id);
+    if(change.code_test.status!=='PENDING') throw new Error('CODE_TEST_ALREADY_RESOLVED:'+change.id);
+
+    const at=Number(now());
+    change.code_test={status:passed?'PASS':'FAIL',detail:text(detail,500)||null,at};
+    change.updated_at=at;
+
+    if(!passed){
+      change.status='CODE_FAIL';
+      change.live.status=change.live.required ? 'BLOCKED' : 'NOT_REQUIRED';
+      change.history.push({at,status:'CODE_FAIL',detail:change.code_test.detail});
+      await persist(state);
+      await publish(change,'CODE_FAIL',{detail:change.code_test.detail});
+      return clone(change);
+    }
+
+    if(!change.live.required){
+      change.status='VERIFIED';
+      change.history.push({at,status:'VERIFIED',detail:'CODE_PASS_LIVE_NOT_REQUIRED'});
+      await persist(state);
+      await publish(change,'VERIFIED',{detail:'Automated test passed; live verification not required.'});
+      return clone(change);
+    }
+
+    change.status='LIVE_PENDING';
+    change.live.status='PENDING';
+    change.live.started_at=at;
+    change.history.push({at,status:'LIVE_PENDING',detail:change.live.waiting_for});
+    await persist(state);
+    await publish(change,'LIVE_PENDING',{detail:'Automated test passed.'});
+    return clone(change);
+  }
+
+  async function resolveLiveInternal(state,change,{passed,actual=null,detail=null}={}){
+    if(change.status!=='LIVE_PENDING' || change.live.status!=='PENDING'){
+      throw new Error('LIVE_NOT_PENDING:'+change.id);
+    }
+    const at=Number(now());
+    change.live.status=passed?'PASS':'FAIL';
+    change.live.resolved_at=at;
+    change.live.actual=clone(actual);
+    change.live.detail=text(detail,500)||null;
+    change.status=passed?'VERIFIED':'LIVE_FAIL';
+    change.updated_at=at;
+    change.history.push({at,status:passed?'LIVE_PASS':'LIVE_FAIL',detail:change.live.detail});
+    await persist(state);
+    await publish(change,passed?'LIVE_PASS':'LIVE_FAIL',{detail:change.live.detail,actual:clone(actual)});
+    return clone(change);
+  }
+
+  async function resolveLive(id,result={}){
+    const state=await loadState();
+    const change=requireChange(state,id);
+    return resolveLiveInternal(state,change,result);
+  }
+
+  async function observe(signal,payload={}){
+    const state=await loadState();
+    const sig=text(signal,100);
+    const matches=[];
+    for(const change of Object.values(state.changes)){
+      if(change.status!=='LIVE_PENDING' || change.live.status!=='PENDING') continue;
+      if(change.live.signal!==sig) continue;
+      if(!deepMatch(change.live.trigger || {},payload)) continue;
+      const passed=deepMatch(change.live.expect || {},payload);
+      const resolved=await resolveLiveInternal(state,change,{
+        passed,
+        actual:payload,
+        detail:passed?'Live proof matched expected result.':'Live proof did not match expected result.'
+      });
+      matches.push(resolved);
+    }
+    return matches;
+  }
+
+  async function cancel(id,reason='CANCELLED'){
+    const state=await loadState();
+    const change=requireChange(state,id);
+    if(FINAL_STATUSES.has(change.status)) return clone(change);
+    const at=Number(now());
+    change.status='CANCELLED';
+    if(change.live.status==='PENDING') change.live.status='CANCELLED';
+    change.updated_at=at;
+    change.history.push({at,status:'CANCELLED',detail:text(reason,300)});
+    await persist(state);
+    return clone(change);
+  }
+
+  async function supersede(id,byId){
+    const state=await loadState();
+    const change=requireChange(state,id);
+    const at=Number(now());
+    change.status='SUPERSEDED';
+    if(change.live.status==='PENDING') change.live.status='SUPERSEDED';
+    change.superseded_by=text(byId,100)||null;
+    change.updated_at=at;
+    change.history.push({at,status:'SUPERSEDED',detail:change.superseded_by});
+    await persist(state);
+    return clone(change);
+  }
+
+  async function get(id){
+    const state=await loadState();
+    return clone(requireChange(state,id));
+  }
+
+  async function list({status=null}={}){
+    const state=await loadState();
+    return Object.values(state.changes)
+      .filter(change=>!status || change.status===status)
+      .sort((a,b)=>Number(b.created_at)-Number(a.created_at))
+      .map(clone);
+  }
+
+  async function summary(){
+    const rows=await list();
+    const counts={};
+    for(const row of rows) counts[row.status]=(counts[row.status]||0)+1;
+    return {
+      schema:SCHEMA_VERSION,
+      total:rows.length,
+      pending:rows.filter(row=>row.status==='LIVE_PENDING').map(row=>({
+        id:row.id,
+        area:row.area,
+        description:row.description,
+        waiting_for:row.live.waiting_for,
+        since:row.live.started_at
+      })),
+      counts
+    };
+  }
+
+  async function isComplete(id){
+    const change=await get(id);
+    return change.status==='VERIFIED';
+  }
+
+  return {
+    registerChange,
+    markCodeTest,
+    observe,
+    resolveLive,
+    cancel,
+    supersede,
+    get,
+    list,
+    summary,
+    isComplete
+  };
+}
+
+module.exports={createChangeVerifier,deepMatch,SCHEMA_VERSION};
+
+},{}],
+"core/change-verification/createDefaultRuntime.js":[function(require,module,exports){
+'use strict';
+
+const {createChangeVerifier}=require('./ChangeVerifier');
+const {createAlertManager}=require('../alerts/AlertManager');
+const {createLocalStorageChangeStore}=require('../../adapters/storage/LocalStorageChangeStore');
+const {createBrowserAlertSink}=require('../../adapters/alerts/BrowserAlertSink');
+const {createBridgeAlertSink}=require('../../adapters/alerts/BridgeAlertSink');
+
+function createDefaultChangeVerificationRuntime({root=(typeof globalThis!=='undefined'?globalThis:{}),now=Date.now}={}){
+  const store=createLocalStorageChangeStore({storage:root.localStorage});
+  const browser=createBrowserAlertSink({root});
+  const bridge=createBridgeAlertSink({root,storage:root.localStorage});
+  const alertManager=createAlertManager({sinks:[bridge,browser],now});
+  const verifier=createChangeVerifier({store,alertManager,now});
+
+  return {
+    verifier,
+    alertManager,
+    alerts:{browser,bridge},
+    async start(){
+      await bridge.drain();
+      return verifier.summary();
+    }
+  };
+}
+
+module.exports={createDefaultChangeVerificationRuntime};
+
+},{"./ChangeVerifier":"core/change-verification/ChangeVerifier.js","../alerts/AlertManager":"core/alerts/AlertManager.js","../../adapters/storage/LocalStorageChangeStore":"adapters/storage/LocalStorageChangeStore.js","../../adapters/alerts/BrowserAlertSink":"adapters/alerts/BrowserAlertSink.js","../../adapters/alerts/BridgeAlertSink":"adapters/alerts/BridgeAlertSink.js"}],
+"core/contracts/AdventureLandContract.js":[function(require,module,exports){
+'use strict';
+
+const OFFICIAL_SOURCE=Object.freeze({
+  repository:'kaansoral/adventureland_mongodb',
+  commit:'ddcf7222c3264f1404382e1ff5dea8e73f6cb4b4',
+  files:Object.freeze({
+    runner:'js/runner_functions.js',
+    common:'js/old_common_functions.js',
+    skills:'design/skills.js',
+    items:'design/items.js'
+  })
+});
+
+const BANK_PACK_SIZE=42;
+const BANK_STORE_SCOPE='CURRENT_BANK_FLOOR_ONLY';
+const TRANSPORT=Object.freeze({timeoutMs:20000,arrivalProof:'CHARACTER_MAP_EQUALS_DESTINATION'});
+const DOUBLE_HANDED_WTYPES=Object.freeze(['axe','basher','great_staff']);
+const COMBAT_OWNERSHIP=Object.freeze({
+  sourceRepository:'kaansoral/adventureland_mongodb',
+  sourceCommit:'90052162eb3ebda36c893e1eb4af643913c8f984',
+  nonCooperativeRewardOwner:'MONSTER_TARGET',
+  claimRule:'FIRST_HOSTILE_HIT_WHILE_UNCLAIMED',
+  tauntRedirect:'SAME_PARTY_TARGET_ONLY',
+  agitateRedirect:'SAME_PARTY_OR_UNCLAIMED_ONLY'
+});
+
+function bankPackFloor(pack){
+  const match=/^items(\d+)$/.exec(String(pack||''));
+  if(!match)return null;
+  const n=Number(match[1]);
+  if(n>=0&&n<=7)return'bank';
+  if(n>=8&&n<=23)return'bank_b';
+  if(n>=24&&n<=47)return'bank_u';
+  return null;
+}
+
+function bankPacksForFloor(floor){
+  const ranges={bank:[0,7],bank_b:[8,23],bank_u:[24,47]};
+  const range=ranges[String(floor||'')];
+  if(!range)return[];
+  const out=[];
+  for(let i=range[0];i<=range[1];i++)out.push('items'+i);
+  return out;
+}
+
+function validBankSlot(slot){
+  const n=Number(slot);
+  return Number.isInteger(n)&&n>=0&&n<BANK_PACK_SIZE;
+}
+
+const ITEMS=Object.freeze({
+  wbasher:Object.freeze({
+    type:'weapon',
+    wtype:'basher',
+    tier:1,
+    displayName:'Wooden Basher'
+  })
+});
+
+const SKILLS=Object.freeze({
+  cleave:Object.freeze({
+    class:'warrior',wtype:Object.freeze(['axe','scythe']),range:160,level:52,mp:720,cooldown:1200,
+    hostile:true,damageType:'physical',piercesImmunity:true,procs:true
+  }),
+  agitate:Object.freeze({
+    class:'warrior',range:320,level:68,mp:420,cooldown:2200,
+    hostile:true
+  }),
+  hardshell:Object.freeze({
+    class:'warrior',level:60,mp:480,cooldown:16000
+  }),
+  stomp:Object.freeze({
+    class:'warrior',wtype:'basher',range:400,level:52,mp:120,cooldown:24000,duration:3200,
+    hostile:true,damageType:'physical'
+  }),
+  blink:Object.freeze({
+    class:'mage',mp:1600,cooldown:1200,targetType:'COORDINATES'
+  }),
+  magiport:Object.freeze({
+    class:'mage',mp:900,cooldown:0,targetType:'PLAYER',global:true,requiresPveConsent:true
+  }),
+  burst:Object.freeze({
+    class:'mage',mp:0,ratio:0.555,cooldown:6000,useRange:true,
+    hostile:true,damageType:'pure',targetType:'HOSTILE_TARGET',usesEntireCurrentMp:true
+  }),
+  cburst:Object.freeze({
+    class:'mage',level:75,mp:80,ratio:0.5,cooldown:240,list:true,useRange:true,
+    hostile:true,damageType:'magical',targetType:'TARGET_MP_LIST'
+  }),
+  energize:Object.freeze({
+    class:'mage',range:320,level:20,cooldown:4000,targetType:'PLAYER',variableMp:true
+  }),
+  reflection:Object.freeze({
+    class:'mage',mp:540,range:320,level:60,cooldown:30000,targetType:'PLAYER',
+    reflectsDamageType:'magical',physicalOnlyUseful:false,pureUseful:false
+  }),
+  zapperzap:Object.freeze({
+    item:'zapper',slots:Object.freeze(['ring1','ring2']),mp:140,range:420,cooldown:200,damage:200,
+    targetType:'HOSTILE_TARGET',hostile:true,damageType:'magical'
+  }),
+  taunt:Object.freeze({
+    class:'warrior',range:200,mp:40,cooldown:3000,damage:1,
+    targetType:'HOSTILE_TARGET',hostile:true,piercesImmunity:true
+  })
+});
+
+function isTwoHandedWtype(wtype){
+  return DOUBLE_HANDED_WTYPES.includes(String(wtype||''));
+}
+
+module.exports={
+  OFFICIAL_SOURCE,
+  BANK_PACK_SIZE,
+  BANK_STORE_SCOPE,
+  TRANSPORT,
+  DOUBLE_HANDED_WTYPES,
+  COMBAT_OWNERSHIP,
+  ITEMS,
+  SKILLS,
+  bankPackFloor,
+  bankPacksForFloor,
+  validBankSlot,
+  isTwoHandedWtype
+};
+
+},{}],
+"core/health/ProductiveHeartbeat.js":[function(require,module,exports){
+'use strict';
+
+function clone(value){return value==null?value:JSON.parse(JSON.stringify(value));}
+
+function createProductiveHeartbeat({characters=[],heartbeatTimeoutMs=15000,progressTimeoutMs=60000,now=Date.now}={}){
+  const rows=Object.create(null);
+  for(const name of characters) rows[name]={character:name,controller_at:null,progress_at:null,last_progress:null,progress_count:0};
+
+  function ensure(character){
+    const name=String(character||'');
+    if(!rows[name])rows[name]={character:name,controller_at:null,progress_at:null,last_progress:null,progress_count:0};
+    return rows[name];
+  }
+
+  function controllerBeat(character,detail=null){
+    const row=ensure(character);
+    row.controller_at=Number(now());
+    row.controller_detail=clone(detail);
+    return clone(row);
+  }
+
+  function progress(character,kind,detail=null){
+    const row=ensure(character);
+    const at=Number(now());
+    row.controller_at=at;
+    row.progress_at=at;
+    row.progress_count++;
+    row.last_progress={kind:String(kind||'PROGRESS'),detail:clone(detail),at};
+    return clone(row);
+  }
+
+  // A supervised safety HOLD is not productive gameplay even when a recent
+  // real action occurred before the HOLD. Preserve that action's timestamp
+  // for diagnosis; never manufacture progress when the HOLD clears.
+  function setProgressHold(character,reason=null){
+    const row=ensure(character);
+    row.progress_hold=typeof reason==='string'&&reason.trim()?reason.trim():null;
+    return{character:row.character,held:row.progress_hold!==null,reason:row.progress_hold};
+  }
+
+  function status(character){
+    const row=ensure(character),t=Number(now());
+    const heartbeatAge=row.controller_at==null?Infinity:t-row.controller_at;
+    const progressAge=row.progress_at==null?Infinity:t-row.progress_at;
+    return Object.assign(clone(row),{
+      heartbeat_age_ms:heartbeatAge,
+      progress_age_ms:progressAge,
+      controller_fresh:heartbeatAge<=heartbeatTimeoutMs,
+      progress_held:row.progress_hold!=null,
+      progress_hold_reason:row.progress_hold||null,
+      productive:row.progress_hold==null&&progressAge<=progressTimeoutMs
+    });
+  }
+
+  function all(){return Object.keys(rows).sort().map(status);}
+  return{controllerBeat,progress,setProgressHold,status,all};
+}
+
+module.exports={createProductiveHeartbeat};
+
+},{}],
+"core/health/ReadinessAudit.js":[function(require,module,exports){
+'use strict';
+
+const {validateBridge}=require('../../adapters/bridge/BridgeV3Contract');
+
+const DEFAULT_STATE_EXPECTATIONS=Object.freeze([
+  'FARM','BANK','STAND','WORLD_BOSS','EVENT','PVP_DEFENSE','GEAR_PRODUCTION'
+]);
+
+function clone(v){return v==null?v:JSON.parse(JSON.stringify(v));}
+
+function createReadinessAudit({manifest,stateExpectations=DEFAULT_STATE_EXPECTATIONS}={}){
+  if(!manifest)throw new Error('READINESS_MANIFEST_REQUIRED');
+
+  function audit({
+    character,
+    role,
+    moduleSupervisor,
+    stateCoordinator,
+    bridgeRoot=null,
+    activationMode='development'
+  }={}){
+    const modules=moduleSupervisor&&typeof moduleSupervisor.all==='function'?moduleSupervisor.all():[];
+    const moduleMap=Object.fromEntries(modules.map(row=>[row.name,row]));
+    const stateStatus=stateCoordinator&&typeof stateCoordinator.status==='function'?stateCoordinator.status():{registered:[]};
+    const registered=new Set(stateStatus.registered||[]);
+
+    const states={};
+    for(const name of stateExpectations){
+      const executable=registered.has(name);
+      let status=executable?'EXECUTABLE':'NOT_REGISTERED';
+      if(!executable){
+        if(name==='WORLD_BOSS'&&moduleMap.WorldBoss)status='POLICY_READY_EXECUTOR_MISSING';
+        else if(name==='EVENT'&&moduleMap.Events)status='POLICY_READY_EXECUTOR_MISSING';
+        else if(name==='PVP_DEFENSE'&&moduleMap.PvpDefense)status='POLICY_READY_EXECUTOR_MISSING';
+        else if(name==='GEAR_PRODUCTION'&&moduleMap.GearProduction)status='POLICY_READY_EXECUTOR_MISSING';
+      }
+      states[name]={status,executable};
+    }
+
+    const mode=String(activationMode||'development').toLowerCase();
+    const bridge=bridgeRoot?validateBridge(bridgeRoot,character,{requireRecovery:mode==='live'}):{ok:false,failures:['BRIDGE_NOT_ATTACHED'],bridge:null};
+    const coreReady=modules.every(row=>row.critical!==true||['READY','ATTACHED','PAUSED'].includes(row.status));
+    const disabled=modules.filter(row=>row.status==='DISABLED'||row.status==='CORE_FAILED').map(row=>({name:row.name,status:row.status,error:row.error}));
+    const missingExecutors=Object.entries(states).filter(([,row])=>row.status.includes('EXECUTOR_MISSING')).map(([name])=>name);
+
+    const liveEligible=
+      manifest.production_selectable===true &&
+      bridge.ok===true &&
+      coreReady &&
+      disabled.length===0 &&
+      missingExecutors.length===0;
+
+    return{
+      ok:coreReady,
+      character:String(character||''),
+      role:String(role||''),
+      build:manifest.build,
+      production_selectable:manifest.production_selectable===true,
+      activation_mode:mode,
+      core_ready:coreReady,
+      bridge_ready:bridge.ok===true,
+      bridge_failures:bridge.failures||[],
+      modules:clone(modules),
+      disabled_modules:disabled,
+      states,
+      missing_executors:missingExecutors,
+      live_eligible:liveEligible,
+      verdict:liveEligible?'LIVE_ELIGIBLE':'NOT_LIVE_ELIGIBLE'
+    };
+  }
+
+  return{audit};
+}
+
+module.exports={createReadinessAudit,DEFAULT_STATE_EXPECTATIONS};
+
+},{"../../adapters/bridge/BridgeV3Contract":"adapters/bridge/BridgeV3Contract.js"}],
+"core/lifecycle/LifecycleSupervisor.js":[function(require,module,exports){
+'use strict';
+
+const ORDER=Object.freeze(['BOOT','HOOKS_READY','CONTROLLER_READY','ROLE_READY','ACTIVE']);
+const RANK=new Map(ORDER.map((name,index)=>[name,index]));
+
+function clone(value){return value==null?value:JSON.parse(JSON.stringify(value));}
+
+function createLifecycleSupervisor({build,heartbeat,now=Date.now}={}){
+  if(!heartbeat||typeof heartbeat.status!=='function')throw new Error('LIFECYCLE_HEARTBEAT_REQUIRED');
+  const characters=Object.create(null);
+
+  function ensure(character){
+    const name=String(character||'');
+    if(!characters[name])characters[name]={
+      character:name,build:String(build||'UNKNOWN'),stage:'BOOT',stage_at:Number(now()),
+      hooks_ready:false,controller_ready:false,role_ready:false,active:false,last_error:null
+    };
+    return characters[name];
+  }
+
+  function advance(character,next,detail=null){
+    const row=ensure(character);
+    const target=String(next||'');
+    if(!RANK.has(target))return{ok:false,error:'INVALID_LIFECYCLE_STAGE'};
+    if(RANK.get(target)<RANK.get(row.stage))return{ok:false,error:'LIFECYCLE_REGRESSION_BLOCKED',stage:row.stage};
+    if(RANK.get(target)>RANK.get(row.stage)+1)return{ok:false,error:'LIFECYCLE_STAGE_SKIPPED',stage:row.stage,next:target};
+    row.stage=target;row.stage_at=Number(now());row.last_detail=clone(detail);
+    row.hooks_ready=RANK.get(target)>=RANK.get('HOOKS_READY');
+    row.controller_ready=RANK.get(target)>=RANK.get('CONTROLLER_READY');
+    row.role_ready=RANK.get(target)>=RANK.get('ROLE_READY');
+    row.active=target==='ACTIVE';
+    return{ok:true,status:status(character)};
+  }
+
+  function fail(character,error){
+    const row=ensure(character);
+    row.last_error=String(error&&error.message||error||'UNKNOWN');
+    row.active=false;
+    return status(character);
+  }
+
+  function status(character){
+    const row=ensure(character);
+    const hb=heartbeat.status(character);
+    return Object.assign(clone(row),{
+      heartbeat:hb,
+      healthy:row.stage==='ACTIVE'&&hb.controller_fresh&&hb.productive&&!row.last_error
+    });
+  }
+
+  function all(){return Object.keys(characters).sort().map(status);}
+  return{advance,fail,status,all,stages:ORDER};
+}
+
+module.exports={createLifecycleSupervisor,STAGES:ORDER};
+
+},{}],
+"core/modules/ModuleCatalog.js":[function(require,module,exports){
+'use strict';
+
+const {getRoleManifest}=require('../../roles/RoleManifest');
+
+function clone(v){return v==null?v:JSON.parse(JSON.stringify(v));}
+
+function createModuleCatalog(){
+  const specs=new Map();
+
+  function register(name,spec={}){
+    const key=String(name||'');
+    if(!key)throw new Error('CATALOG_MODULE_NAME_REQUIRED');
+    if(specs.has(key))throw new Error('CATALOG_MODULE_DUPLICATE:'+key);
+    if(typeof spec.factory!=='function')throw new Error('CATALOG_FACTORY_REQUIRED:'+key);
+    specs.set(key,{
+      name:key,
+      version:String(spec.version||'1'),
+      critical:spec.critical===true,
+      dependencies:[...(spec.dependencies||[])].map(String),
+      resources:[...(spec.resources||[])].map(String),
+      factory:spec.factory,
+      available:typeof spec.available==='function'?spec.available:()=>true
+    });
+    return api;
+  }
+
+  function has(name){return specs.has(String(name||''));}
+  function describe(name){
+    const row=specs.get(String(name||''));
+    return row?clone({name:row.name,version:row.version,critical:row.critical,dependencies:row.dependencies,resources:row.resources}):null;
+  }
+
+  async function buildNames(names,context={},builtIn=[]){
+    const built=new Map();
+    const services=context.services&&typeof context.services==='object'?context.services:{};
+    context.services=services;
+    const errors=[];
+    const visiting=new Set();
+    const builtInSet=new Set((builtIn||[]).map(String));
+
+    async function build(name){
+      const key=String(name||'');
+      if(builtInSet.has(key))return{ok:true,built_in:true,name:key};
+      if(built.has(key))return{ok:true,entry:built.get(key)};
+      const spec=specs.get(key);
+      if(!spec)return{ok:false,error:'CATALOG_MODULE_NOT_FOUND',name:key};
+      if(visiting.has(key))return{ok:false,error:'CATALOG_DEPENDENCY_CYCLE',name:key};
+      if(spec.available(context)!==true)return{ok:false,error:'CATALOG_MODULE_UNAVAILABLE',name:key};
+
+      visiting.add(key);
+      for(const dep of spec.dependencies){
+        const result=await build(dep);
+        if(!result.ok){visiting.delete(key);return{ok:false,error:'CATALOG_DEPENDENCY_FAILED',name:key,dependency:dep,cause:result};}
+      }
+
+      let made;
+      try{made=await spec.factory(context);}
+      catch(error){visiting.delete(key);return{ok:false,error:'CATALOG_FACTORY_FAILED',name:key,detail:String(error&&error.message||error)};}
+      if(!made){visiting.delete(key);return{ok:false,error:'CATALOG_FACTORY_EMPTY',name:key};}
+      const module=made.module||made;
+      const service=made.service||made.instance||module;
+      services[key]=service;
+      const entry={
+        name:key,module,
+        critical:spec.critical,
+        version:spec.version,
+        dependencies:spec.dependencies.slice(),
+        resources:spec.resources.slice()
+      };
+      built.set(key,entry);
+      visiting.delete(key);
+      return{ok:true,entry};
+    }
+
+    for(const name of names||[]){
+      const result=await build(name);
+      if(!result.ok)errors.push(result);
+    }
+    return{
+      ok:errors.length===0,
+      entries:Array.from(built.values()),
+      services,
+      errors
+    };
+  }
+
+  async function buildRole(character,context={},builtIn=['CoreSupervisor']){
+    const role=getRoleManifest(character);
+    context.character=role.character;
+    context.role=role.role;
+    const requested=[...role.required,...role.optional];
+    const graph=await buildNames(requested,context,builtIn);
+    const requiredErrors=graph.errors.filter(row=>role.required.includes(String(row.name||'')));
+    const optionalErrors=graph.errors.filter(row=>role.optional.includes(String(row.name||'')));
+    return{
+      ok:requiredErrors.length===0,
+      character:role.character,
+      role:role.role,
+      entries:graph.entries,
+      services:graph.services,
+      required_errors:requiredErrors,
+      optional_errors:optionalErrors,
+      missing_optional:optionalErrors.map(row=>String(row.name||'')).filter(Boolean)
+    };
+  }
+
+  function list(){return Array.from(specs.keys()).sort().map(describe);}
+  const api={register,has,describe,buildNames,buildRole,list};
+  return api;
+}
+
+function lifecycleFacade(instance){
+  return{
+    attach:async ctx=>typeof instance.attach==='function'?instance.attach(ctx):{ok:true},
+    start:async ctx=>typeof instance.start==='function'?instance.start(ctx):{ok:true},
+    pause:async ctx=>typeof instance.pause==='function'?instance.pause(ctx):{ok:true},
+    resume:async ctx=>typeof instance.resume==='function'?instance.resume(ctx):{ok:true},
+    health:async ctx=>{
+      if(typeof instance.health==='function')return instance.health(ctx);
+      if(typeof instance.getStatus==='function')return{ok:true,status:instance.getStatus()};
+      if(typeof instance.status==='function')return{ok:true,status:instance.status()};
+      return{ok:true};
+    },
+    snapshot:async ctx=>{
+      if(typeof instance.snapshot==='function')return instance.snapshot(ctx);
+      if(typeof instance.getStatus==='function')return instance.getStatus();
+      if(typeof instance.status==='function')return instance.status();
+      return null;
+    },
+    restore:async(value,ctx)=>typeof instance.restore==='function'?instance.restore(value,ctx):{ok:true,ignored:true},
+    s
