@@ -1,0 +1,1053 @@
+RequiredParty,defaultWarriorMiniState,createFarmState};
+
+},{"./FarmSafeRegroup":"organs/farm/FarmSafeRegroup.js","../../navigation/MerchantSafeSpotTravel":"navigation/MerchantSafeSpotTravel.js"}],
+"organs/gear/GearControlPlane.js":[function(require,module,exports){
+'use strict';
+
+const registry=require('./GearRegistry');
+const {destination,validateResolvedDeposit}=require('../bank/BankDestinations');
+const characterWhitelist=require('../../core/policy/CharacterWhitelist');
+const handoffPolicy=require('../../ligaments/gear/GearHandoffPolicy');
+
+function quantityOf(value,id){
+  if(Array.isArray(value))return value.reduce((n,x)=>n+quantityOf(x,id),0);
+  if(!value||typeof value!=='object')return 0;
+  if(value.name===id)return Number(value.q||1);
+  return Object.values(value).reduce((n,x)=>n+quantityOf(x,id),0);
+}
+function sourceMaterial(id,{inventory=[],bank=[],npcStock={}}={}){
+  id=String(id||'');
+  if(!id||id==='NONE')return{ok:true,source:'NONE',item:id};
+  if(quantityOf(inventory,id)>0)return{ok:true,source:'INVENTORY',item:id};
+  if(quantityOf(bank,id)>0)return{ok:true,source:'BANK',item:id};
+  const rule=registry.MATERIALS[id]; const npc=rule&&rule.npcFallback; const stock=npcStock&&npcStock[id];
+  if(npc&&npc.verified===true&&stock&&stock.verified===true&&Number(stock.quantity||0)>0&&stock.npc===npc.npc){
+    return{ok:true,source:'NPC',item:id,npc:npc.npc};
+  }
+  return{ok:false,error:'MATERIAL_UNAVAILABLE',item:id};
+}
+function productionRuleFor(operation,item,variant){
+  if(!['UPGRADE','COMPOUND'].includes(operation))return{ok:true,rule:null};
+  if(variant==='SHINY'){
+    if(registry.SHINY.enabled!==true)return{ok:false,error:'SHINY_PROCESSING_DISABLED'};
+    const shiny=registry.SHINY[item];
+    if(!shiny||shiny.enabled===false||String(shiny.action||'').toUpperCase()!==operation)return{ok:false,error:'SHINY_PRODUCTION_RULE_UNAVAILABLE'};
+    return{ok:true,rule:shiny};
+  }
+  if(variant!=='NORMAL')return{ok:false,error:'JOB_VARIANT_UNSAFE'};
+  const rule=handoffPolicy.ruleFor(item);
+  if(!rule)return{ok:false,error:'PRODUCTION_ITEM_NOT_WHITELISTED'};
+  if(String(rule.operation||'').toUpperCase()!==operation)return{ok:false,error:'PRODUCTION_OPERATION_MISMATCH'};
+  return{ok:true,rule};
+}
+function buildJob(input={}){
+  const operation=String(input.operation||'').toUpperCase();
+  if(!['UPGRADE','COMPOUND','EXCHANGE','BANK','SELL','KEEP'].includes(operation))return{ok:false,error:'JOB_OPERATION_INVALID'};
+  const item=String(input.item||''); if(!item)return{ok:false,error:'JOB_ITEM_REQUIRED'};
+  const variant=String(input.variant||'NORMAL').toUpperCase();
+  const checked=productionRuleFor(operation,item,variant); if(!checked.ok)return checked;
+  if(operation==='EXCHANGE'){
+    const exchange=registry.EXCHANGE[item];
+    if(!exchange||exchange.enabled!==true)return{ok:false,error:'EXCHANGE_ITEM_NOT_ENABLED'};
+  }
+  if(operation==='SELL'){
+    const decision=registry.sellDecision({name:item,level:input.level,p:input.p});
+    if(decision.action!=='SELL')return{ok:false,error:'SELL_POLICY_REJECTED',reason:decision.reason};
+  }
+  const rule=checked.rule;
+  const target=input.target==null?(rule&&rule.target!=null?Number(rule.target):registry.DEFAULT_TARGETS[operation]):Number(input.target);
+  if(['UPGRADE','COMPOUND'].includes(operation)&&(!Number.isInteger(target)||target<0))return{ok:false,error:'JOB_TARGET_INVALID'};
+  const after=String(input.after||(rule&&rule.after)||'BANK').toUpperCase();
+  if(!['BANK','KEEP','SELL'].includes(after))return{ok:false,error:'JOB_AFTER_INVALID'};
+  const bankDestination=String(input.destination||(rule&&rule.destination)||'AUTO_POLICY').toUpperCase();
+  if(after==='BANK'&&!destination(bankDestination))return{ok:false,error:'BANK_DESTINATION_UNKNOWN'};
+  const scroll=String(input.scroll||(rule&&rule.scroll)||'AUTO');
+  const offering=String(input.offering||(rule&&rule.offering)||'NONE');
+  return{
+    ok:true,
+    job:{
+      owner:'V3_GEAR_CONTROL_PLANE',
+      operation,item,target:target==null?null:target,variant,
+      scope:String(input.scope||'ACCOUNT_ALL').toUpperCase(),
+      mode:String(input.mode||'ALL_MATCHING').toUpperCase(),
+      scroll,offering,after,destination:bankDestination,
+      sourceOrder:['INVENTORY','BANK','VERIFIED_NPC'],
+      execution:'ONE_ITEM_THEN_RESCAN',
+      itemResolution:'RELOCATE_IMMEDIATELY_BEFORE_EACH_MUTATION',
+      runtimeConnected:false
+    }
+  };
+}
+function buildTransferJob(input={}){
+  const planned=characterWhitelist.planTransfer({
+    sender:input.sender,
+    receiver:input.receiver,
+    item:input.item,
+    mode:input.mode,
+    authorization:input.authorization,
+    requestedBy:input.requestedBy
+  });
+  if(!planned.ok)return planned;
+  return{
+    ok:true,
+    job:{
+      owner:'V3_GEAR_CONTROL_PLANE',
+      operation:'TRANSFER',
+      sender:planned.sender,
+      receiver:planned.receiver,
+      selector:planned.selector,
+      manualOverride:planned.manualOverride===true,
+      audit:planned.audit||null,
+      itemResolution:'RELOCATE_IMMEDIATELY_BEFORE_EACH_MUTATION',
+      verifyReceiverAfter:true,
+      sourceContract:planned.sourceContract,
+      runtimeConnected:false
+    }
+  };
+}
+
+function normalizeAttempt(input={}){
+  const result=input.result||{}; const operation=String(input.operation||'').toUpperCase(); const rollOperation=['UPGRADE','COMPOUND'].includes(operation);
+  const base={item:String(input.item||''),operation,after:String(input.after||'BANK').toUpperCase(),destination:String(input.destination||'AUTO_POLICY').toUpperCase()};
+  if(result.rejected===true)return{ok:true,attempt:{...base,status:'FAILED_TO_START',rolled:false,deposit:null,reason:String(result.reason||'REQUEST_REJECTED')}};
+  if(result.success===false)return{ok:true,attempt:{...base,status:rollOperation?'ROLLED_FAILURE':'OPERATION_FAILURE',rolled:rollOperation,deposit:null,reason:String(result.reason||'OPERATION_FAILED')}};
+  if(result.success!==true)return{ok:false,error:'ATTEMPT_RESULT_UNPROVEN'};
+  if(base.after==='BANK'){
+    const checked=validateResolvedDeposit(base.destination,input.resolvedDeposit||{});
+    if(!checked.ok)return{ok:false,error:checked.error,detail:checked};
+    return{ok:true,attempt:{...base,status:'SUCCESS',rolled:rollOperation,deposit:checked,reason:null}};
+  }
+  return{ok:true,attempt:{...base,status:'SUCCESS',rolled:rollOperation,deposit:null,reason:null}};
+}
+function summarizeAttempts(attempts=[]){
+  const rows=(Array.isArray(attempts)?attempts:[]).filter(Boolean);
+  const successful=rows.filter(x=>x.status==='SUCCESS').length;
+  const failed=rows.filter(x=>['FAILED_TO_START','ROLLED_FAILURE','OPERATION_FAILURE'].includes(x.status)).length;
+  const total=successful+failed;
+  return{total,successful,failed,successRate:total?successful/total:0};
+}
+module.exports={quantityOf,sourceMaterial,buildJob,buildTransferJob,normalizeAttempt,summarizeAttempts};
+
+},{"./GearRegistry":"organs/gear/GearRegistry.js","../bank/BankDestinations":"organs/bank/BankDestinations.js","../../core/policy/CharacterWhitelist":"core/policy/CharacterWhitelist.js","../../ligaments/gear/GearHandoffPolicy":"ligaments/gear/GearHandoffPolicy.js"}],
+"organs/gear/GearProductionExecutor.js":[function(require,module,exports){
+'use strict';
+
+const GearControlPlane=require('./GearControlPlane');
+
+const OWNER='GEAR_PRODUCTION';
+const DEFAULT_PRIORITY=45;
+const clone=v=>v==null?v:JSON.parse(JSON.stringify(v));
+
+function createGearProductionExecutor({
+  inventory,
+  movement,
+  handoff,
+  adapter=null,
+  policy=GearControlPlane,
+  priority=DEFAULT_PRIORITY,
+  now=Date.now
+}={}){
+  if(!inventory||typeof inventory.find!=='function'||typeof inventory.slot!=='function'||typeof inventory.reserve!=='function'||typeof inventory.release!=='function'||typeof inventory.reservations!=='function'||typeof inventory.identity!=='function'){
+    throw new Error('GEAR_EXECUTOR_INVENTORY_REQUIRED');
+  }
+  if(!movement||typeof movement.acquire!=='function'||typeof movement.smartMove!=='function'||typeof movement.release!=='function'){
+    throw new Error('GEAR_EXECUTOR_MOVEMENT_REQUIRED');
+  }
+  if(!handoff||typeof handoff.status!=='function'||typeof handoff.acceptGearResult!=='function'){
+    throw new Error('GEAR_EXECUTOR_HANDOFF_REQUIRED');
+  }
+
+  const state={
+    version:3,
+    state:'GEAR_PRODUCTION',
+    phase:'STOPPED',
+    paused:false,
+    workId:null,
+    operation:null,
+    item:null,
+    target:null,
+    attempts:0,
+    lastProgress:null,
+    lastError:null,
+    startedAt:null,
+    updatedAt:Number(now())
+  };
+
+  function touch(){state.updatedAt=Number(now());}
+  function snapshot(){return clone(state);}
+  function executionReady(){
+    return !!(
+      adapter&&
+      typeof adapter.ready==='function'&&adapter.ready()===true&&
+      typeof adapter.itemGrade==='function'&&
+      typeof adapter.queueStatus==='function'&&
+      typeof adapter.buy==='function'&&
+      typeof adapter.upgrade==='function'&&
+      typeof adapter.compound==='function'
+    );
+  }
+
+  async function start(){
+    state.paused=false;
+    state.phase='PRECHECK';
+    state.lastError=null;
+    state.startedAt=Number(now());
+    touch();
+    return{ok:true,status:snapshot(),executor_ready:executionReady()};
+  }
+  async function pause(){
+    state.paused=true;
+    state.phase='PAUSED';
+    movement.release(OWNER);
+    touch();
+    return{ok:true,status:snapshot()};
+  }
+  async function resume(){
+    state.paused=false;
+    state.phase='PRECHECK';
+    touch();
+    return{ok:true,status:snapshot()};
+  }
+  async function stop(){
+    movement.release(OWNER);
+    state.paused=false;
+    state.phase='STOPPED';
+    touch();
+    return{ok:true,status:snapshot()};
+  }
+  async function health(){
+    return{
+      ok:state.lastError==null,
+      executor_ready:executionReady(),
+      status:snapshot()
+    };
+  }
+  async function restore(saved){
+    if(!saved||saved.version!==3||saved.state!=='GEAR_PRODUCTION')throw new Error('GEAR_EXECUTOR_SNAPSHOT_INVALID');
+    Object.assign(state,clone(saved));
+    state.phase=state.phase==='STOPPED'?'STOPPED':'PRECHECK';
+    state.paused=false;
+    touch();
+    return{ok:true,status:snapshot()};
+  }
+
+  function activeHandoff(){
+    const active=handoff.status();
+    if(!active)return{ok:false,error:'GEAR_HANDOFF_NOT_ACTIVE'};
+    if(active.phase!=='READY_FOR_GEAR')return{ok:false,error:'GEAR_HANDOFF_NOT_READY',phase:active.phase,active};
+    if(!active.job||!active.work)return{ok:false,error:'GEAR_HANDOFF_JOB_MISSING',active};
+    return{ok:true,active};
+  }
+
+  function reservationsBySlot(){
+    return new Map((inventory.reservations()||[]).map(row=>[Number(row.slot),row]));
+  }
+
+  async function verifyStaged(active){
+    const job=active.job||{};
+    const slots=(job.stagedSlots||[]).map(Number);
+    const identities=(job.stagedIdentities||[]).map(String);
+    const expected=Number(job.expectedInputCount||0);
+    if(!slots.length||slots.length!==identities.length||slots.length!==expected){
+      return{ok:false,error:'GEAR_STAGED_SLOT_CONTRACT_INVALID',slots,identities,expected};
+    }
+    const reservations=reservationsBySlot();
+    const rows=[];
+    for(let i=0;i<slots.length;i++){
+      const slot=slots[i],expectedIdentity=identities[i];
+      const reservation=reservations.get(slot);
+      if(!reservation||reservation.owner!==OWNER){
+        return{ok:false,error:'GEAR_STAGED_RESERVATION_MISSING',slot,reservation:clone(reservation||null)};
+      }
+      const item=await inventory.slot(slot);
+      if(!item)return{ok:false,error:'GEAR_STAGED_ITEM_MISSING',slot};
+      const actual=inventory.identity(item);
+      if(actual!==expectedIdentity){
+        return{ok:false,error:'GEAR_STAGED_IDENTITY_CHANGED',slot,expected:expectedIdentity,actual};
+      }
+      if(String(item.name||'')!==String(job.item||'')){
+        return{ok:false,error:'GEAR_STAGED_ITEM_NAME_MISMATCH',slot,expected:String(job.item||''),actual:String(item.name||'')};
+      }
+      rows.push({slot,item:clone(item),identity:actual});
+    }
+    return{ok:true,rows};
+  }
+
+  function scrollName(job,item){
+    const explicit=String(job.scroll||'AUTO');
+    if(explicit!=='AUTO')return{ok:true,name:explicit};
+    const grade=Number(adapter.itemGrade(item));
+    if(!Number.isFinite(grade)||grade<0)return{ok:false,error:'GEAR_ITEM_GRADE_UNAVAILABLE'};
+    const safeGrade=Math.max(0,Math.min(2,Math.trunc(grade)));
+    return{ok:true,name:(job.operation==='COMPOUND'?'cscroll':'scroll')+safeGrade,grade:safeGrade};
+  }
+
+  async function reserveSupply(name){
+    const id=String(name||'');
+    if(!id||id==='NONE')return{ok:true,slot:null,name:id,reservation:null};
+    let found=await inventory.find(id);
+    if(!found.length)return{ok:false,error:'GEAR_SUPPLY_NOT_FOUND',item:id};
+    const row=found[0];
+    const reserved=await inventory.reserve(row.slot,OWNER,{expected:row.identity});
+    if(!reserved||reserved.ok!==true)return{ok:false,error:reserved&&reserved.error||'GEAR_SUPPLY_RESERVE_FAILED',item:id,slot:row.slot};
+    return{ok:true,slot:Number(row.slot),name:id,reservation:clone(reserved.reservation)};
+  }
+
+  async function ensureScroll(job,item){
+    const named=scrollName(job,item);
+    if(!named.ok)return named;
+    let found=await inventory.find(named.name);
+    if(!found.length){
+      const bought=await adapter.buy(named.name,1);
+      if(!bought||bought.ok!==true)return{ok:false,error:'GEAR_SCROLL_BUY_FAILED',scroll:named.name,detail:clone(bought)};
+      found=await inventory.find(named.name);
+      if(!found.length)return{ok:false,error:'GEAR_SCROLL_BUY_UNVERIFIED',scroll:named.name};
+    }
+    const row=found[0];
+    const reserved=await inventory.reserve(row.slot,OWNER,{expected:row.identity});
+    if(!reserved||reserved.ok!==true)return{ok:false,error:reserved&&reserved.error||'GEAR_SCROLL_RESERVE_FAILED',scroll:named.name,slot:row.slot};
+    return{ok:true,name:named.name,slot:Number(row.slot),reservation:clone(reserved.reservation)};
+  }
+
+  async function finishAsFailure(active,reason,detail=null){
+    state.lastError=null;
+    state.lastProgress='GEAR_RESULT_NEEDS_RESCAN';
+    state.phase='COMPLETE';
+    touch();
+    const accepted=await handoff.acceptGearResult({
+      workId:active.id,
+      success:false,
+      reason:String(reason||'GEAR_OPERATION_FAILED')
+    });
+    if(!accepted||accepted.ok!==true){
+      state.lastError=accepted&&accepted.error||'GEAR_HANDOFF_FAILURE_REPORT_FAILED';
+      touch();
+      return{ok:false,error:state.lastError,detail:clone(detail),status:snapshot()};
+    }
+    return{
+      ok:true,
+      progress:true,
+      complete:true,
+      kind:'GEAR_PRODUCTION_RESULT',
+      reason:'GEAR_ATTEMPT_NEEDS_BANK_RESCAN',
+      operation:active.job.operation,
+      item:active.job.item,
+      result:{success:false,reason:String(reason||'GEAR_OPERATION_FAILED'),detail:clone(detail)},
+      status:snapshot()
+    };
+  }
+
+  async function run(){
+    state.attempts++;
+    touch();
+    if(state.paused)return{ok:true,progress:false,reason:'GEAR_EXECUTOR_PAUSED',status:snapshot()};
+    if(!executionReady()){
+      state.lastError='GEAR_EXECUTOR_NOT_READY';
+      touch();
+      return{ok:false,error:state.lastError,status:snapshot()};
+    }
+
+    const h=activeHandoff();
+    if(!h.ok){
+      state.lastError=h.error;
+      touch();
+      return{ok:false,error:h.error,phase:h.phase||null,status:snapshot()};
+    }
+    const active=h.active,job=active.job;
+    state.workId=String(active.id);
+    state.operation=String(job.operation||'');
+    state.item=String(job.item||'');
+    state.target=Number(job.target);
+    state.phase='PRECHECK';
+    state.lastError=null;
+    touch();
+
+    const queued=adapter.queueStatus();
+    if(queued&&queued.busy===true){
+      state.lastProgress='WAIT_QUEUE';
+      touch();
+      return{ok:true,progress:false,reason:'GEAR_NATIVE_QUEUE_BUSY',queue:clone(queued),status:snapshot()};
+    }
+
+    const staged=await verifyStaged(active);
+    if(!staged.ok)return finishAsFailure(active,staged.error,staged);
+    const beforeLevel=Number(staged.rows[0].item.level||0);
+    if(beforeLevel>=Number(job.target)){
+      const accepted=await handoff.acceptGearResult({
+        workId:active.id,
+        success:true,
+        outputs:[{inventorySlot:staged.rows[0].slot,item:staged.rows[0].item,identity:staged.rows[0].identity}]
+      });
+      if(!accepted||accepted.ok!==true)return{ok:false,error:accepted&&accepted.error||'GEAR_ALREADY_TARGET_HANDOFF_FAILED',status:snapshot()};
+      state.phase='COMPLETE';
+      state.lastProgress='TARGET_ALREADY_REACHED';
+      touch();
+      return{ok:true,progress:true,complete:true,kind:'GEAR_PRODUCTION_RESULT',reason:'GEAR_TARGET_ALREADY_REACHED',status:snapshot()};
+    }
+
+    state.phase='TRAVEL';
+    touch();
+    const lease=movement.acquire(OWNER,{priority:Number(priority)||DEFAULT_PRIORITY});
+    if(!lease||lease.ok!==true){
+      state.lastProgress='WAIT_MOVEMENT';
+      touch();
+      return{ok:true,progress:false,reason:'GEAR_MOVEMENT_PREEMPTED',detail:clone(lease),status:snapshot()};
+    }
+    const moved=await movement.smartMove(OWNER,'upgrade');
+    movement.release(OWNER);
+    if(!moved||moved.ok!==true){
+      state.lastError=moved&&moved.error||'GEAR_UPGRADE_TRAVEL_FAILED';
+      touch();
+      return{ok:false,error:state.lastError,detail:clone(moved),status:snapshot()};
+    }
+
+    state.phase='SUPPLIES';
+    state.lastProgress='AT_UPGRADE_NPC';
+    touch();
+
+    const scroll=await ensureScroll(job,staged.rows[0].item);
+    if(!scroll.ok)return finishAsFailure(active,scroll.error,scroll);
+
+    let offering={ok:true,slot:null,name:'NONE'};
+    if(String(job.offering||'NONE')!=='NONE'){
+      offering=await reserveSupply(job.offering);
+      if(!offering.ok){
+        inventory.release(scroll.slot,OWNER);
+        return finishAsFailure(active,offering.error,offering);
+      }
+    }
+
+    const queuedAgain=adapter.queueStatus();
+    if(queuedAgain&&queuedAgain.busy===true){
+      inventory.release(scroll.slot,OWNER);
+      if(offering.slot!=null)inventory.release(offering.slot,OWNER);
+      state.lastProgress='WAIT_QUEUE_AFTER_SUPPLIES';
+      touch();
+      return{ok:true,progress:false,reason:'GEAR_NATIVE_QUEUE_BUSY',queue:clone(queuedAgain),status:snapshot()};
+    }
+
+    state.phase='EXECUTE';
+    touch();
+    let native;
+    try{
+      if(job.operation==='UPGRADE'){
+        native=await adapter.upgrade(staged.rows[0].slot,scroll.slot,offering.slot);
+      }else if(job.operation==='COMPOUND'){
+        native=await adapter.compound(staged.rows.map(x=>x.slot),scroll.slot,offering.slot);
+      }else{
+        inventory.release(scroll.slot,OWNER);
+        if(offering.slot!=null)inventory.release(offering.slot,OWNER);
+        return finishAsFailure(active,'GEAR_OPERATION_UNSUPPORTED',{operation:job.operation});
+      }
+    }catch(error){
+      inventory.release(scroll.slot,OWNER);
+      if(offering.slot!=null)inventory.release(offering.slot,OWNER);
+      return finishAsFailure(active,'GEAR_NATIVE_EXCEPTION',{message:String(error&&error.message||error)});
+    }
+
+    inventory.release(scroll.slot,OWNER);
+    if(offering.slot!=null)inventory.release(offering.slot,OWNER);
+
+    if(!native||native.ok!==true){
+      return finishAsFailure(active,native&&native.error||'GEAR_NATIVE_CALL_FAILED',native);
+    }
+    const result=native.result&&typeof native.result==='object'?native.result:native;
+    if(result.success!==true){
+      return finishAsFailure(active,result.reason||'GEAR_ROLL_FAILED',result);
+    }
+
+    state.phase='VERIFY';
+    touch();
+    const outputs=[];
+    if(job.operation==='UPGRADE'){
+      const current=await inventory.slot(staged.rows[0].slot);
+      if(current&&String(current.name||'')===String(job.item||'')){
+        const level=Number(current.level||0);
+        if(level>beforeLevel){
+          outputs.push({inventorySlot:staged.rows[0].slot,item:clone(current),identity:inventory.identity(current)});
+        }
+      }
+    }else{
+      for(const row of staged.rows){
+        const current=await inventory.slot(row.slot);
+        if(current&&String(current.name||'')===String(job.item||'')){
+          outputs.push({inventorySlot:row.slot,item:clone(current),identity:inventory.identity(current)});
+        }
+      }
+      if(outputs.length===1&&Number(outputs[0].item.level||0)<=beforeLevel)outputs.length=0;
+    }
+
+    if(outputs.length!==1){
+      return finishAsFailure(active,'GEAR_OUTPUT_VERIFY_FAILED',{operation:job.operation,outputs});
+    }
+
+    const accepted=await handoff.acceptGearResult({
+      workId:active.id,
+      success:true,
+      outputs
+    });
+    if(!accepted||accepted.ok!==true){
+      state.lastError=accepted&&accepted.error||'GEAR_HANDOFF_RESULT_REJECTED';
+      touch();
+      return{ok:false,error:state.lastError,detail:clone(accepted),status:snapshot()};
+    }
+
+    state.phase='COMPLETE';
+    state.lastProgress='GEAR_ATTEMPT_VERIFIED';
+    state.lastError=null;
+    touch();
+    return{
+      ok:true,
+      progress:true,
+      complete:true,
+      kind:'GEAR_PRODUCTION_RESULT',
+      reason:'GEAR_ATTEMPT_VERIFIED',
+      operation:job.operation,
+      item:job.item,
+      target:Number(job.target),
+      output:clone(outputs[0]),
+      native:clone(result),
+      status:snapshot()
+    };
+  }
+
+  return{
+    policy,
+    executionReady,
+    start,pause,resume,stop,health,snapshot,restore,
+    run,getStatus:snapshot
+  };
+}
+
+module.exports={OWNER,DEFAULT_PRIORITY,createGearProductionExecutor};
+
+},{"./GearControlPlane":"organs/gear/GearControlPlane.js"}],
+"organs/gear/GearRegistry.js":[function(require,module,exports){
+'use strict';
+
+const JackoRetentionPolicy=require('./JackoRetentionPolicy');
+const DEFAULT_TARGETS=Object.freeze({UPGRADE:7,COMPOUND:3});
+const DEFAULT_SHINY_ENABLED=false;
+const PRODUCTION=Object.freeze({
+  fireblade:Object.freeze({operation:'UPGRADE',target:7,scroll:'AUTO',offering:'NONE',after:'BANK',destination:'AUTO_POLICY'}),
+  firestaff:Object.freeze({operation:'UPGRADE',target:7,scroll:'AUTO',offering:'offeringp',after:'BANK',destination:'AUTO_POLICY'}),
+  bataxe:Object.freeze({operation:'UPGRADE',target:7,scroll:'scroll1',offering:'NONE',after:'BANK',destination:'AUTO_POLICY'}),
+  oozingterror:Object.freeze({operation:'UPGRADE',target:7,scroll:'AUTO',offering:'offering',after:'BANK',destination:'AUTO_POLICY',enabled:false}),
+  dexring:Object.freeze({operation:'COMPOUND',target:3,scroll:'AUTO',offering:'NONE',after:'BANK',destination:'AUTO_POLICY'}),
+  intring:Object.freeze({operation:'COMPOUND',target:3,scroll:'AUTO',offering:'NONE',after:'BANK',destination:'AUTO_POLICY'}),
+  strring:Object.freeze({operation:'COMPOUND',target:3,scroll:'AUTO',offering:'NONE',after:'BANK',destination:'AUTO_POLICY'}),
+  wbook1:Object.freeze({operation:'COMPOUND',target:3,scroll:'cscroll1',offering:'NONE',after:'BANK',destination:'AUTO_POLICY'})
+});
+const SHINY=Object.freeze({
+  enabled:DEFAULT_SHINY_ENABLED,
+  fireblade:Object.freeze({action:'UPGRADE',target:7,scroll:'AUTO',offering:'offeringp',after:'BANK',destination:'CHRISTIE'}),
+  firestaff:Object.freeze({action:'UPGRADE',target:7,scroll:'AUTO',offering:'NONE',after:'BANK',destination:'CHRISTIE',enabled:false})
+});
+const MATERIALS=Object.freeze({
+  offeringp:Object.freeze({displayName:'Primling',npcFallback:null}),
+  offering:Object.freeze({displayName:'Primordial Essence',npcFallback:Object.freeze({verified:true,npc:'Garwyn'})}),
+  offeringx:Object.freeze({displayName:'Primordial X',npcFallback:null})
+});
+const EXCHANGE=Object.freeze({
+  weaponbox:Object.freeze({enabled:true,outputs:Object.freeze({
+    fireblade:Object.freeze({action:'UPGRADE',target:7}),
+    bataxe:Object.freeze({action:'BANK',destination:'WEAPONS'}),
+    spear:Object.freeze({action:'SELL'})
+  })}),
+  armorbox:Object.freeze({enabled:true,outputs:Object.freeze({
+    gcape:Object.freeze({action:'UPGRADE',target:7}),
+    hboots:Object.freeze({action:'BANK',destination:'GEAR'})
+  })}),
+  lostearring:Object.freeze({enabled:false,outputs:Object.freeze({lostearring:Object.freeze({action:'COMPOUND',target:3})})})
+});
+const SELL_ITEMS=Object.freeze(['helmet','shoes','pants','gloves','coat','xmace','hpamulet','hpbelt','basher','wbook0']);
+const CHARACTER_RULES=Object.freeze({
+  Rentaro:Object.freeze({role:'Merchant',keep:Object.freeze(['hpot1','mpot1','tracker','computer']),loadout:Object.freeze(['broom','jacko +3'])}),
+  Harutora:Object.freeze({role:'Mage',keep:Object.freeze(['hpot1','mpot1','tracker','computer','pumpkinspice','zapper']),loadout:Object.freeze(['broom','firestaff','angelwings','gcape'])}),
+  Hibari:Object.freeze({role:'Warrior',keep:Object.freeze(['hpot1','mpot1','tracker','computer']),loadout:Object.freeze(['wbasher +3','vhammer','fireblade','bataxe'])}),
+  Souji:Object.freeze({role:'Priest',keep:Object.freeze(['hpot1','mpot1','tracker','computer']),loadout:Object.freeze(['zapper'])})
+});
+function isShiny(item){return !!(item&&item.p==='shiny');}
+function sellDecision(item,context={}){
+  if(JackoRetentionPolicy.isProtectedJacko(item))return{action:'KEEP',reason:'JACKO_PLUS1_GLOBAL_PROTECTION'};
+  if(!item||!item.name)return{action:'HOLD',reason:'ITEM_INVALID'};
+  if(isShiny(item))return{action:'KEEP',reason:'SHINY_PROTECTED'};
+  const level=Number(item.level||0);
+  if(item.name==='wbasher'){
+    if(level===3)return{action:'KEEP',reason:'WARRIOR_STOMP_RESERVED'};
+    if(level<3)return{action:'SELL',reason:'WBASHER_BELOW_PLUS3'};
+    return{action:'KEEP',reason:'WBASHER_ABOVE_PLUS3_SAFE_DEFAULT'};
+  }
+  if(SELL_ITEMS.includes(item.name))return{action:'SELL',reason:'SELL_REGISTRY'};
+  return{action:'HOLD',reason:'NO_SELL_RULE'};
+}
+function productionDecision(item,{shinyEnabled=DEFAULT_SHINY_ENABLED,character=null,inventory=null,index=-1}={}){
+  if(JackoRetentionPolicy.isJacko(item)){
+    const verdict=JackoRetentionPolicy.actionAllowed({character,inventory,index,action:'UPGRADE'});
+    return{action:'HOLD',reason:verdict.allowed?'JACKO_MANUAL_EXTRA_ONLY':verdict.reason};
+  }
+  if(!item||!item.name)return{action:'HOLD',reason:'ITEM_INVALID'};
+  if(isShiny(item)&&shinyEnabled!==true)return{action:'KEEP',reason:'SHINY_PROTECTED'};
+  const rule=PRODUCTION[item.name];
+  if(!rule||rule.enabled===false)return{action:'HOLD',reason:'NO_ACTIVE_PRODUCTION_RULE'};
+  const level=Number(item.level||0);
+  if(level>=rule.target)return{action:rule.after||'BANK',reason:'TARGET_REACHED',destination:rule.destination||'AUTO_POLICY',rule};
+  return{action:rule.operation,reason:'PRODUCTION_RULE',rule};
+}
+module.exports={JackoRetentionPolicy,DEFAULT_TARGETS,DEFAULT_SHINY_ENABLED,PRODUCTION,SHINY,MATERIALS,EXCHANGE,SELL_ITEMS,CHARACTER_RULES,isShiny,sellDecision,productionDecision};
+
+},{"./JackoRetentionPolicy":"organs/gear/JackoRetentionPolicy.js"}],
+"organs/gear/JackoRetentionPolicy.js":[function(require,module,exports){
+'use strict';
+/**
+ * Jacko policy v1: non-merchant characters never sell/trash/deposit any jacko +1+.
+ * Rentaro may work on EXTRA copies only. Until he possesses a +3, keep at least
+ * one +2 in his actual carried inventory (not bank/equipped alone).
+ * Protect one +3 as an emergency Scare orb once acquired.
+ * Fail closed: caller must provide complete and current carried inventory.
+ */
+const nameOf=i=>String(i?.name||'');
+const levelOf=i=>Number(i?.level||0);
+const isJacko=i=>nameOf(i)==='jacko';
+const isProtectedJacko=i=>isJacko(i)&&levelOf(i)>=1;
+const isMerchant=c=>c?.name==='Rentaro'&&c?.ctype==='merchant';
+const countAt=(items,level)=>items.filter(x=>isJacko(x)&&levelOf(x)===level).length;
+const countHigh=(items,level)=>items.filter(x=>isJacko(x)&&levelOf(x)>=level).length;
+function snapshot(character,inventory){
+ const items=Array.isArray(inventory)?inventory:null;
+ return {valid:!!character&&!!items,merchant:isMerchant(character),plus2:items?countAt(items,2):0,plus3:items?countHigh(items,3):0,inventory:items};
+}
+function actionAllowed({character,inventory,index,action}={}){
+ const s=snapshot(character,inventory);
+ if(!s.valid||!Number.isInteger(index)||index<0||index>=s.inventory.length)
+  return {allowed:false,reason:'JACKO_POLICY_INCOMPLETE_INPUT'};
+ const item=s.inventory[index],level=levelOf(item);
+ if(!isJacko(item))return {allowed:true,reason:'NOT_JACKO'};
+ if(!s.merchant){
+  if(level>=1)return {allowed:false,reason:'NON_MERCHANT_JACKO_PLUS1_PROTECTED'};
+  return {allowed:true,reason:'JACKO_LEVEL0_STANDARD_POLICY'};
+ }
+ const a=String(action||'').toUpperCase();
+ if(!['SELL','TRASH','DEPOSIT','BANK','UPGRADE','COMPOUND','EXCHANGE'].includes(a))
+  return {allowed:false,reason:'JACKO_ACTION_UNRECOGNIZED'};
+ // The last +2 is a protected emergency orb until a +3 is carried.
+ if(level===2&&s.plus3<1&&s.plus2<=1)
+  return {allowed:false,reason:'RENTARO_LAST_PLUS2_RESERVED_UNTIL_PLUS3'};
+ // Even with +3 available, reserve at least one +3 for Scare.
+ if(level>=3&&s.plus3<=1)
+  return {allowed:false,reason:'RENTARO_LAST_PLUS3_RESERVED_FOR_SCARE'};
+ // An additional +2 may only be upgraded if a +2 remains carried or
+ // a +3 has already replaced it. This is rechecked before each operation.
+ if(a==='UPGRADE'&&level===2&&s.plus3<1&&s.plus2-1<1)
+  return {allowed:false,reason:'UPGRADE_WOULD_CONSUME_LAST_PLUS2'};
+ return {allowed:true,reason:'RENTARO_EXTRA_JACKO_PERMITTED'};
+}
+function checkUpgrade({character,inventory,index}={}){
+ return actionAllowed({character,inventory,index,action:'UPGRADE'});
+}
+function classifyJacko({character,inventory,index}={}){
+ const items=Array.isArray(inventory)?inventory:[];
+ const item=items[index];
+ if(!isJacko(item))return null;
+ if(!isMerchant(character)&&levelOf(item)>=1)
+  return {action:'KEEP',reason:'NON_MERCHANT_JACKO_PLUS1_PROTECTED'};
+ const actions=['SELL','TRASH','DEPOSIT','UPGRADE'];
+ const permissions=actions.map(action=>actionAllowed({character,inventory:items,index,action}));
+ if(permissions.some(p=>!p.allowed))
+  return {action:'KEEP',reason:permissions.find(p=>!p.allowed).reason};
+ return {action:'KEEP',reason:'JACKO_DEFAULT_KEEP_MANUAL_EXTRA_PROCESS_ONLY'};
+}
+module.exports={isJacko,isProtectedJacko,isMerchant,snapshot,actionAllowed,checkUpgrade,classifyJacko};
+
+},{}],
+"organs/pvp-defense/DefensivePvp.js":[function(require,module,exports){
+'use strict';
+
+const OFFICIAL_SOURCE=Object.freeze({
+  repository:'kaansoral/adventureland_mongodb',
+  commit:'ddcf7222c3264f1404382e1ff5dea8e73f6cb4b4',
+  hitEvent:'docs/articles/events-game.html',
+  hostileFilter:'js/runner_functions.js',
+  skills:'design/skills.js'
+});
+const DEFAULT_CREW=Object.freeze(['Rentaro','Harutora','Hibari','Souji']);
+const ROLE_THREAT=Object.freeze({priest:320,ranger:290,mage:270,rogue:250,warrior:210,merchant:90});
+
+function clone(v){return v==null?v:JSON.parse(JSON.stringify(v));}
+function makeSet(values){return new Set((values||[]).map(String).filter(Boolean));}
+
+function createDefensivePvp({crew=DEFAULT_CREW,whitelist=[],blacklist=[],now=Date.now,quietMs=7000}={}){
+  const crewSet=makeSet(crew),white=makeSet(whitelist),black=makeSet(blacklist);
+  for(const name of crewSet)white.add(name);
+  const state={
+    active:false,startedAt:null,lastAggressionAt:null,primary:null,victim:null,
+    hostiles:{},groupKeys:{party:[],team:[]},sessionCount:0,lastEnd:null
+  };
+  function protectedEntity(entity){
+    if(!entity)return true;
+    const name=String(entity.name||entity.id||'');
+    if(!name||crewSet.has(name)||white.has(name))return true;
+    if(entity.sameParty===true||entity.sameTeam===true||entity.sameGuild===true||entity.ownerFriend===true)return true;
+    return false;
+  }
+  function addHostile(entity,reason){
+    if(!entity||protectedEntity(entity))return false;
+    const name=String(entity.name||entity.id||'');if(!name)return false;
+    const t=Number(now());
+    const old=state.hostiles[name]||{};
+    state.hostiles[name]={name,ctype:String(entity.ctype||old.ctype||''),firstAt:old.firstAt||t,lastAt:t,reason:String(reason||'DEFENSE')};
+    return true;
+  }
+  function observeHit({actor,target,visiblePlayers=[]}={}){
+    if(!actor||!target)return{ok:false,error:'HIT_INCOMPLETE'};
+    const victim=String(target.name||target.id||target);
+    if(!crewSet.has(victim))return{ok:true,triggered:false,reason:'TARGET_NOT_CREW'};
+    if(protectedEntity(actor))return{ok:true,triggered:false,reason:'ACTOR_PROTECTED'};
+    const t=Number(now());
+    if(!state.active){
+      state.active=true;state.startedAt=t;state.sessionCount++;state.hostiles={};state.groupKeys={party:[],team:[]};
+      state.primary=String(actor.name||actor.id||'');
+    }
+    state.lastAggressionAt=t;state.victim=victim;
+    addHostile(actor,'DIRECT_AGGRESSOR');
+    const party=String(actor.party||''),team=String(actor.team||'');
+    if(party&&!state.groupKeys.party.includes(party))state.groupKeys.party.push(party);
+    if(team&&!state.groupKeys.team.includes(team))state.groupKeys.team.push(team);
+    for(const e of visiblePlayers){
+      if(!e)continue;
+      if((party&&String(e.party||'')===party)||(team&&String(e.team||'')===team))addHostile(e,'AGGRESSOR_GROUP');
+    }
+    return{ok:true,triggered:true,session:status()};
+  }
+  function refreshVisibleGroups(visiblePlayers=[]){
+    if(!state.active)return{ok:true,added:[]};
+    const added=[];
+    // Refresh party/team keys from proven hostiles first. This catches metadata
+    // that becomes visible after the original hit event.
+    for(const e of visiblePlayers){
+      const name=String(e&&e.name||e&&e.id||'');
+      if(!name||!state.hostiles[name])continue;
+      const party=String(e.party||''),team=String(e.team||'');
+      if(party&&!state.groupKeys.party.includes(party))state.groupKeys.party.push(party);
+      if(team&&!state.groupKeys.team.includes(team))state.groupKeys.team.push(team);
+    }
+    // Then admit any visible member of an aggressor party/team. Protected
+    // entities are still rejected by addHostile, so whitelist/crew/friends win.
+    for(const e of visiblePlayers){
+      if(!e)continue;
+      const party=String(e.party||''),team=String(e.team||'');
+      const grouped=(party&&state.groupKeys.party.includes(party))||(team&&state.groupKeys.team.includes(team));
+      if(!grouped)continue;
+      const name=String(e.name||e.id||'');
+      const existed=!!state.hostiles[name];
+      if(addHostile(e,'AGGRESSOR_GROUP_LATE_VISIBLE')&&!existed)added.push(name);
+    }
+    return{ok:true,added};
+  }
+  function score(entity){
+    const name=String(entity&&entity.name||entity&&entity.id||'');
+    let value=ROLE_THREAT[String(entity&&entity.ctype||'')]||120;
+    if(name===state.primary)value+=700;
+    if(black.has(name))value+=450;
+    if(entity&&entity.targetsCrew===true)value+=420;
+    if(entity&&entity.targetsVulnerableCrew===true)value+=120;
+    const hp=Number(entity&&entity.hp),max=Number(entity&&entity.max_hp);
+    if(Number.isFinite(hp)&&Number.isFinite(max)&&max>0)value+=Math.round((1-Math.max(0,Math.min(1,hp/max)))*220);
+    const d=Number(entity&&entity.distance);
+    if(Number.isFinite(d))value-=Math.round(d*0.12);
+    return value;
+  }
+  function chooseFocus(visiblePlayers=[]){
+    refreshVisibleGroups(visiblePlayers);
+    const eligible=visiblePlayers.filter(e=>{
+      const name=String(e&&e.name||e&&e.id||'');
+      return !!state.hostiles[name]&&!protectedEntity(e)&&e.dead!==true&&e.rip!==true;
+    });
+    eligible.sort((a,b)=>score(b)-score(a)||String(a.name||a.id||'').localeCompare(String(b.name||b.id||'')));
+    return eligible.length?clone(eligible[0]):null;
+  }
+  function authorizeHostileAction(entity){
+    if(!state.active)return{ok:false,reason:'NO_DEFENSE_SESSION'};
+    if(protectedEntity(entity))return{ok:false,reason:'PROTECTED'};
+    const name=String(entity&&entity.name||entity&&entity.id||'');
+    if(!state.hostiles[name])return{ok:false,reason:'NOT_PROVEN_HOSTILE'};
+    return{ok:true};
+  }
+  function authorizeAoe(visiblePlayers=[],radius=400){
+    if(!state.active)return{ok:false,reason:'NO_DEFENSE_SESSION'};
+    refreshVisibleGroups(visiblePlayers);
+    for(const e of visiblePlayers){
+      if(!e||Number(e.distance)>Number(radius))continue;
+      if(protectedEntity(e))continue;
+      const name=String(e.name||e.id||'');
+      if(!state.hostiles[name])return{ok:false,reason:'NEUTRAL_IN_AOE',neutral:name};
+    }
+    return{ok:true};
+  }
+  function planRoleActions({role,focus,visiblePlayers=[],hpRatio=1,mp=0,cooldowns={}}={}){
+    refreshVisibleGroups(visiblePlayers);
+    const auth=authorizeHostileAction(focus);
+    if(!auth.ok)return[];
+    const hostileCount=Object.keys(state.hostiles).length;
+    const actions=[];
+    if(role==='warrior'){
+      if(cooldowns.warcry===true)actions.push({skill:'warcry',kind:'BUFF_GROUP'});
+      if((hostileCount>=2||Number(hpRatio)<0.70)&&cooldowns.hardshell===true)actions.push({skill:'hardshell',kind:'DEFENSE'});
+      if(cooldowns.taunt===true)actions.push({skill:'taunt',target:String(focus.name||focus.id),kind:'CONTROL'});
+      if(cooldowns.stomp===true&&hostileCount>=2&&authorizeAoe(visiblePlayers,400).ok)actions.push({skill:'stomp',kind:'AOE_CONTROL',requiresEquipment:'wbasher+3'});
+    }else if(role==='mage'){
+      if(cooldowns.reflection===true&&state.victim)actions.push({skill:'reflection',target:state.victim,kind:'DEFENSE'});
+      if(cooldowns.cburst===true&&Number(mp)>3320)actions.push({skill:'cburst',target:String(focus.name||focus.id),maxAllocatedMp:Math.min(650,Number(mp)-3200),kind:'FOCUS_DAMAGE'});
+    }else if(role==='priest'){
+      if(cooldowns.partyheal===true)actions.push({skill:'partyheal',kind:'SUSTAIN'});
+      if(cooldowns.darkblessing===true)actions.push({skill:'darkblessing',kind:'BUFF_GROUP'});
+      if(cooldowns.curse===true)actions.push({skill:'curse',target:String(focus.name||focus.id),kind:'DEBUFF'});
+    }
+    actions.push({kind:'BASIC_ATTACK',target:String(focus.name||focus.id)});
+    return actions;
+  }
+  function endIfQuiet(visiblePlayers=[]){
+    if(!state.active)return{ok:true,ended:false};
+    refreshVisibleGroups(visiblePlayers);
+    const alive=visiblePlayers.some(e=>{
+      const name=String(e&&e.name||e&&e.id||'');
+      return !!state.hostiles[name]&&!protectedEntity(e)&&e.dead!==true&&e.rip!==true;
+    });
+    if(alive)return{ok:true,ended:false};
+    if(Number(now())-Number(state.lastAggressionAt||0)<Number(quietMs))return{ok:true,ended:false};
+    state.lastEnd={at:Number(now()),reason:'HOSTILES_GONE',durationMs:Number(now())-Number(state.startedAt||now())};
+    state.active=false;state.primary=null;state.victim=null;state.hostiles={};state.groupKeys={party:[],team:[]};
+    return{ok:true,ended:true,resume:'EXISTING_BOSS_OR_PVE',lastEnd:clone(state.lastEnd)};
+  }
+  function whitelistAdd(name){name=String(name||'');if(!name)return false;white.add(name);black.delete(name);return true;}
+  function whitelistRemove(name){name=String(name||'');if(crewSet.has(name))return false;return white.delete(name);}
+  function blacklistAdd(name){name=String(name||'');if(!name||white.has(name)||crewSet.has(name))return false;black.add(name);return true;}
+  function blacklistRemove(name){return black.delete(String(name||''));}
+  function status(){return{...clone(state),defensiveOnly:true,whitelist:Array.from(white).sort(),blacklist:Array.from(black).sort(),officialSource:OFFICIAL_SOURCE};}
+  return{observeHit,refreshVisibleGroups,chooseFocus,authorizeHostileAction,authorizeAoe,planRoleActions,endIfQuiet,whitelistAdd,whitelistRemove,blacklistAdd,blacklistRemove,status};
+}
+
+module.exports={OFFICIAL_SOURCE,DEFAULT_CREW,ROLE_THREAT,createDefensivePvp};
+
+},{}],
+"organs/stand/StandState.js":[function(require,module,exports){
+'use strict';
+
+const clone=v=>v==null?v:JSON.parse(JSON.stringify(v));
+
+function createStandState({adapter,now=Date.now}={}){
+  if(!adapter||typeof adapter.isOpen!=='function'||typeof adapter.open!=='function'||typeof adapter.close!=='function')throw new Error('STAND_ADAPTER_REQUIRED');
+  const state={version:3,state:'STAND',phase:'CLOSED',paused:false,opened_at:null,last_error:null};
+
+  const snapshot=()=>clone(state);
+  // Startup observation is read-only. A merchant's stand may already be
+  // physically open when V3 attaches; assuming CLOSED until an explicit
+  // STAND action causes false STAND_STATE_MISMATCH alerts in BANK/IDLE.
+  async function initialize(){
+    const open=await adapter.isOpen();
+    state.phase=state.paused?'PAUSED':open?'OPEN':'CLOSED';
+    state.last_error=null;
+    return{ok:true,initialized:true,observedOpen:open,status:snapshot()};
+  }
+  async function sync(){
+    const open=await adapter.isOpen();
+    state.phase=open?'OPEN':'CLOSED';
+    return open;
+  }
+  async function start(){
+    if(state.paused)return{ok:false,error:'STAND_PAUSED'};
+    if(await sync())return{ok:true,status:snapshot(),already_open:true};
+    const r=await adapter.open();
+    if(r&&r.ok===false){state.last_error=r.error||'STAND_OPEN_FAILED';return{ok:false,error:state.last_error};}
+    state.phase='OPEN';state.opened_at=Number(now());state.last_error=null;
+    return{ok:true,status:snapshot()};
+  }
+  async function pause(){
+    state.paused=true;
+    if(await adapter.isOpen())await adapter.close();
+    state.phase='PAUSED';
+    return{ok:true,status:snapshot()};
+  }
+  async function resume(){state.paused=false;state.phase='CLOSED';return{ok:true,status:snapshot()};}
+  async function stop(){
+    if(await adapter.isOpen())await adapter.close();
+    state.phase='CLOSED';state.paused=false;
+    return{ok:true,status:snapshot()};
+  }
+  async function health(){
+    const open=await adapter.isOpen();
+    const expected=state.phase==='OPEN';
+    if(expected!==open)return{ok:false,error:'STAND_STATE_MISMATCH',expected,actual:open,status:snapshot()};
+    return{ok:true,status:snapshot()};
+  }
+  async function restore(saved){
+    if(!saved||saved.version!==3||saved.state!=='STAND')throw new Error('STAND_SNAPSHOT_INVALID');
+    Object.assign(state,clone(saved));
+    return{ok:true,status:snapshot()};
+  }
+
+  return{initialize,start,pause,resume,stop,health,snapshot,restore,getStatus:snapshot};
+}
+
+module.exports={createStandState};
+
+},{}],
+"roles/RoleManifest.js":[function(require,module,exports){
+'use strict';
+
+const ROLE_MANIFESTS=Object.freeze({
+  Rentaro:Object.freeze({
+    character:'Rentaro',
+    role:'MERCHANT',
+    required:Object.freeze(['CoreSupervisor']),
+    optional:Object.freeze(['Gear','Inventory','RecipeIntelligence','BankNavigation','BankTravel','GearHandoff','GearProduction','Shop','Bank','Stand','ScanBoss','Events','PvpDefense','MerchantController'])
+  }),
+  Harutora:Object.freeze({
+    character:'Harutora',
+    role:'MAGE',
+    required:Object.freeze(['CoreSupervisor']),
+    optional:Object.freeze(['Gear','PartyCoordination','Targeting','MageCombat','FighterActions','Farm','WorldBoss','ScanBoss','Events','PvpDefense'])
+  }),
+  Hibari:Object.freeze({
+    character:'Hibari',
+    role:'WARRIOR',
+    required:Object.freeze(['CoreSupervisor']),
+    optional:Object.freeze(['Gear','PartyCoordination','Targeting','WarriorCombat','FighterActions','Farm','WorldBoss','ScanBoss','Events','PvpDefense'])
+  }),
+  Souji:Object.freeze({
+    character:'Souji',
+    role:'PRIEST',
+    required:Object.freeze(['CoreSupervisor']),
+    optional:Object.freeze(['Gear','PartyCoordination','Targeting','PriestCombat','FighterActions','Farm','WorldBoss','ScanBoss','Events','PvpDefense'])
+  })
+});
+
+function getRoleManifest(character){
+  const row=ROLE_MANIFESTS[String(character||'')];
+  if(!row)throw new Error('ROLE_MANIFEST_NOT_FOUND:'+String(character||''));
+  return row;
+}
+
+function validateRoleManifest(manifest){
+  if(!manifest||typeof manifest!=='object')return{ok:false,error:'ROLE_MANIFEST_REQUIRED'};
+  if(!manifest.character||!manifest.role)return{ok:false,error:'ROLE_IDENTITY_REQUIRED'};
+  if(!Array.isArray(manifest.required)||!Array.isArray(manifest.optional))return{ok:false,error:'ROLE_MODULE_LIST_REQUIRED'};
+  const all=[...manifest.required,...manifest.optional];
+  const dup=all.find((name,index)=>all.indexOf(name)!==index);
+  if(dup)return{ok:false,error:'ROLE_MODULE_DUPLICATE',module:dup};
+  return{ok:true};
+}
+
+function resolveRoleModules(character,catalog={}){
+  const manifest=getRoleManifest(character);
+  const required=[],optional=[],missingRequired=[],missingOptional=[];
+  for(const name of manifest.required){
+    if(catalog[name])required.push({name,module:catalog[name]});
+    else missingRequired.push(name);
+  }
+  for(const name of manifest.optional){
+    if(catalog[name])optional.push({name,module:catalog[name]});
+    else missingOptional.push(name);
+  }
+  return{
+    ok:missingRequired.length===0,
+    character:manifest.character,
+    role:manifest.role,
+    required,
+    optional,
+    missing_required:missingRequired,
+    missing_optional:missingOptional
+  };
+}
+
+module.exports={ROLE_MANIFESTS,getRoleManifest,validateRoleManifest,resolveRoleModules};
+
+},{}],
+"states/StateRegistry.js":[function(require,module,exports){
+'use strict';
+
+const SAFETY_HIERARCHY=Object.freeze([
+  'EMERGENCY',
+  'RETREAT',
+  'RECOVERY',
+  'PVP_DEFENSE'
+]);
+
+const GAMEPLAY_HIERARCHY=Object.freeze([
+  'WORLD_BOSS',
+  'EVENT',
+  'BANK',
+  'GEAR_PRODUCTION',
+  'STAND',
+  'FARM',
+  'IDLE'
+]);
+
+const MAIN_HIERARCHY=Object.freeze([
+  ...SAFETY_HIERARCHY,
+  ...GAMEPLAY_HIERARCHY
+]);
+
+const STATES=Object.freeze({
+  EMERGENCY:Object.freeze({priority:100,kind:'core',tier:'SAFETY',main:true,movement_owner:'EMERGENCY'}),
+  RETREAT:Object.freeze({priority:95,kind:'core',tier:'SAFETY',main:true,movement_owner:'RETREAT'}),
+  RECOVERY:Object.freeze({priority:90,kind:'core',tier:'SAFETY',main:true,movement_owner:'RECOVERY'}),
+  PVP_DEFENSE:Object.freeze({priority:80,kind:'organ',tier:'SAFETY',main:true,movement_owner:'PVP_DEFENSE'}),
+  WORLD_BOSS:Object.freeze({priority:70,kind:'organ',tier:'GAMEPLAY',main:true,movement_owner:'WORLD_BOSS'}),
+  EVENT:Object.freeze({priority:60,kind:'organ',tier:'GAMEPLAY',main:true,movement_owner:'EVENT'}),
+  BANK:Object.freeze({priority:50,kind:'organ',tier:'GAMEPLAY',main:true,movement_owner:'BANK'}),
+  GEAR_PRODUCTION:Object.freeze({priority:45,kind:'organ',tier:'GAMEPLAY',main:true,movement_owner:'GEAR_PRODUCTION'}),
+  STAND:Object.freeze({priority:40,kind:'organ',tier:'GAMEPLAY',main:true,movement_owner:null}),
+  SCAN_BOSS:Object.freeze({priority:35,kind:'side',tier:'OBSERVATION',main:false,movement_owner:null}),
+  FARM:Object.freeze({priority:20,kind:'organ',tier:'GAMEPLAY',main:true,movement_owner:'FARM'}),
+  IDLE:Object.freeze({priority:0,kind:'core',tier:'GAMEPLAY',main:true,movement_owner:null})
+});
+
+function getState(name){return STATES[String(name||'')]||null;}
+function priority(name){const row=getState(name);return row?row.priority:-1;}
+function isMainState(name){const row=getState(name);return !!(row&&row.main===true);}
+function canPreempt(current,next){
+  if(!isMainState(next))return false;
+  if(String(current||'')==='IDLE')return String(next||'')!=='IDLE';
+  if(!isMainState(current))return false;
+  return priority(next)>priority(current);
+}
+function list(){return Object.entries(STATES).map(([name,value])=>({name,...value}));}
+function mainHierarchy(){return MAIN_HIERARCHY.slice();}
+function gameplayHierarchy(){return GAMEPLAY_HIERARCHY.slice();}
+function safetyHierarchy(){return SAFETY_HIERARCHY.slice();}
+
+module.exports={
+  STATES,
+  SAFETY_HIERARCHY,
+  GAMEPLAY_HIERARCHY,
+  MAIN_HIERARCHY,
+  getState,
+  priority,
+  isMainState,
+  canPreempt,
+  list,
+  mainHierarchy,
+  gameplayHierarchy,
+  safetyHierarchy
+};
+
+},{}]
+},cache=Object.create(null);
+function load(id){
+ if(Object.prototype.hasOwnProperty.call(cache,id))return cache[id].exports;
+ var d=defs[id];if(!d)throw Error('O66_UNBUNDLED_MODULE:'+id);
+ var m={exports:{}};cache[id]=m;
+ function req(s){if(!Object.prototype.hasOwnProperty.call(d[1],s))throw Error('O66_UNDECLARED_IMPORT:'+id+':'+s);
+ return load(d[1][s]);}
+ d[0](req,m,m.exports);return m.exports;
+}
+root.__O66_DIRECT_BUNDLE_INFO={sourceCommit:'649166c842b5617b053b58006936cf7835c269c2',modules:Object.keys(defs).length,loadedAt:Date.now(),role:root.character?.name||null};
+void load('bootstrap/Order66DirectLaunch.js').launchOrder66Direct({root:root}).then(function(res){
+ root.__O66_DIRECT_LAST_RESULT=res;
+ try{console.log('O66_V3_DIRECT_RESULT',res?.ok,res?.role,res?.error||'',res?.status?.runtime||null)}catch(e){}
+}).catch(function(e){
+ root.__O66_DIRECT_LAST_RESULT={ok:false,error:String(e&&e.stack||e)};
+ try{console.error('O66_V3_DIRECT_THROW',e)}catch(_){}
+});
+})(globalThis);
