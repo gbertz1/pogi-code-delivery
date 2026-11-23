@@ -1,0 +1,2876 @@
+ess:false,state:active,reason:'NO_TICK_HANDLER'};
+
+    if(result&&result.progress===true&&onProgress){
+      await onProgress(result.kind||active,result);
+    }
+    if(result&&result.complete===true){
+      const done=await complete(active,{reason:result.reason||'STATE_COMPLETE'});
+      return{...result,completion:done};
+    }
+    return result||{ok:true,progress:false,state:active};
+  }
+
+  async function recoverCurrent({reason='RECOVERY'}={}){
+    if(paused)return{ok:false,error:'STATE_COORDINATOR_PAUSED'};
+    const active=current();
+    if(active==='IDLE')return{ok:true,no_change:true,state:'IDLE'};
+    const h=handler(active);
+    if(!h)return{ok:false,error:'STATE_HANDLER_UNAVAILABLE',state:active};
+
+    const saved=await snapshotHandler(active);
+    await call(active,'stop',{reason:'RECOVER_'+String(reason)});
+    const moved=stateEngine.transitionMain(active,{reason:'RECOVER_'+String(reason),resetSides:false});
+    if(!moved.ok)return moved;
+    if(saved!=null)await call(active,'restore',clone(saved),{reason:'RECOVER_'+String(reason)});
+    const recovered=await call(active,'recover',clone(saved),{reason:'RECOVER_'+String(reason),from:active});
+    if(recovered&&recovered.ok===false){
+      return{ok:false,error:recovered.error||'STATE_RECOVERY_HOOK_FAILED',state:active,recovery:recovered};
+    }
+    return{ok:true,state:active,recovered:true,snapshot_restored:saved!=null,recovery_hook:recovered!=null,stack_depth:stack.length};
+  }
+
+  async function pauseAll(reason='PAUSED'){
+    if(paused)return{ok:false,error:'ALREADY_PAUSED'};
+    pausePending=null;
+    paused=true;pauseReason=String(reason);
+    const active=current();
+    if(active!=='IDLE')await call(active,'pause',{reason:pauseReason});
+    const enginePause=stateEngine.pause(pauseReason);
+    return{ok:enginePause.ok,state:active,reason:pauseReason};
+  }
+
+  async function requestPause(reason='MANUAL_PAUSE',{finishBank=true}={}){
+    if(paused)return{ok:true,already_paused:true,state:current(),reason:pauseReason};
+    if(pausePending)return{ok:true,pending:true,...clone(pausePending)};
+    const active=current();
+    if(finishBank!==false&&active==='BANK'){
+      pausePending={
+        reason:String(reason||'MANUAL_PAUSE'),
+        wait_for_state:'BANK',
+        requested_at:Number(now())
+      };
+      return{ok:true,pending:true,state:active,...clone(pausePending)};
+    }
+    return pauseAll(reason);
+  }
+
+  async function resumeAll(){
+    if(!paused&&pausePending){
+      const pending=clone(pausePending);
+      pausePending=null;
+      return{ok:true,cancelled_pending:true,pending};
+    }
+    if(!paused)return{ok:false,error:'NOT_PAUSED'};
+    const engineResume=stateEngine.resume();
+    if(!engineResume.ok)return engineResume;
+    paused=false;
+    const active=current();
+    const reason=pauseReason;
+    pauseReason=null;
+    if(active!=='IDLE')await call(active,'resume',{reason:'RESUME_'+String(reason||'PAUSE')});
+    return{ok:true,state:active};
+  }
+
+  function status(){
+    return{
+      current:current(),
+      paused,
+      pause_reason:pauseReason,
+      pause_pending:clone(pausePending),
+      stack:clone(stack),
+      registered:Array.from(handlers.keys()).sort()
+    };
+  }
+
+  const api={register,request,replace,complete,tick,recoverCurrent,pauseAll,requestPause,resumeAll,status};
+  return api;
+}
+
+module.exports={createStateCoordinator};
+
+},{"../../states/StateRegistry":"states/StateRegistry.js"}],
+"core/state/StateEngine.js":[function(require,module,exports){
+'use strict';
+
+const clone=value=>value==null?value:JSON.parse(JSON.stringify(value));
+
+function createStateEngine({main='IDLE',now=Date.now}={}){
+  const state={
+    main:String(main),
+    mainReason:'INITIAL',
+    sides:{},
+    paused:false,
+    pauseReason:null,
+    pauseSnapshot:null,
+    revision:1,
+    updatedAt:Number(now())
+  };
+
+  const snapshot=()=>clone(state);
+  const bump=()=>{state.revision++;state.updatedAt=Number(now());};
+
+  function transitionMain(next,{reason='UNSPECIFIED',resetSides=true}={}){
+    if(state.paused)return{ok:false,error:'STATE_PAUSED'};
+    next=String(next||'');
+    if(!next)return{ok:false,error:'MAIN_STATE_REQUIRED'};
+    state.main=next;
+    state.mainReason=String(reason);
+    if(resetSides)state.sides={};
+    bump();
+    return{ok:true,state:snapshot()};
+  }
+
+  function setSide(name,value,{owner,reason='UNSPECIFIED'}={}){
+    if(state.paused)return{ok:false,error:'STATE_PAUSED'};
+    name=String(name||'');
+    owner=String(owner||'');
+    if(!name)return{ok:false,error:'SIDE_STATE_REQUIRED'};
+    if(!owner)return{ok:false,error:'SIDE_OWNER_REQUIRED'};
+    if(state.sides[name]&&state.sides[name].owner!==owner){
+      return{ok:false,error:'SIDE_OWNER_MISMATCH',owner:state.sides[name].owner};
+    }
+    state.sides[name]={value:clone(value),owner,reason:String(reason),at:Number(now())};
+    bump();
+    return{ok:true,side:clone(state.sides[name])};
+  }
+
+  function clearSide(name,{owner}={}){
+    if(state.paused)return{ok:false,error:'STATE_PAUSED'};
+    name=String(name||'');
+    if(!state.sides[name])return{ok:true,removed:false};
+    if(owner&&state.sides[name].owner!==String(owner))return{ok:false,error:'SIDE_OWNER_MISMATCH',owner:state.sides[name].owner};
+    delete state.sides[name];
+    bump();
+    return{ok:true,removed:true};
+  }
+
+  function pause(reason='PAUSED'){
+    if(state.paused)return{ok:false,error:'ALREADY_PAUSED'};
+    state.pauseSnapshot={main:state.main,mainReason:state.mainReason,sides:clone(state.sides)};
+    state.paused=true;
+    state.pauseReason=String(reason);
+    bump();
+    return{ok:true,state:snapshot()};
+  }
+
+  function resume(){
+    if(!state.paused||!state.pauseSnapshot)return{ok:false,error:'NOT_PAUSED'};
+    const saved=clone(state.pauseSnapshot);
+    state.main=saved.main;
+    state.mainReason=saved.mainReason;
+    state.sides=saved.sides;
+    state.paused=false;
+    state.pauseReason=null;
+    state.pauseSnapshot=null;
+    bump();
+    return{ok:true,state:snapshot()};
+  }
+
+  return{transitionMain,setSide,clearSide,pause,resume,getStatus:snapshot};
+}
+
+module.exports={createStateEngine};
+
+},{}],
+"core/supervision/CoreSupervisor.js":[function(require,module,exports){
+'use strict';
+
+function clone(value){return value==null?value:JSON.parse(JSON.stringify(value));}
+
+function createCoreSupervisor({
+  character,
+  lease,
+  heartbeat,
+  lifecycle,
+  moduleSupervisor,
+  proof,
+  recovery,
+  recoveryExecutor=null,
+  alertManager=null,
+  now=Date.now,
+  intervalMs=5000,
+  recoveryRetryMs=15000,
+  setIntervalFn=setInterval,
+  clearIntervalFn=clearInterval
+}={}){
+  const name=String(character||'');
+  if(!name)throw new Error('CORE_SUPERVISOR_CHARACTER_REQUIRED');
+  if(!lease||typeof lease.renew!=='function')throw new Error('CORE_SUPERVISOR_LEASE_REQUIRED');
+  if(!heartbeat||typeof heartbeat.controllerBeat!=='function')throw new Error('CORE_SUPERVISOR_HEARTBEAT_REQUIRED');
+  if(!lifecycle||typeof lifecycle.status!=='function')throw new Error('CORE_SUPERVISOR_LIFECYCLE_REQUIRED');
+  if(!proof||typeof proof.publish!=='function')throw new Error('CORE_SUPERVISOR_PROOF_REQUIRED');
+
+  let timer=null;
+  let running=false;
+  let ticking=false;
+  let tickCount=0;
+  let lastTickAt=null;
+  let lastError=null;
+  let productivityAlerted=false;
+  let lastRecoveryAt=null;
+  let lastRecoveryResult=null;
+  let gameplayHold=null;
+  let gameplayHoldAlerted=null;
+
+  // An explicit, supervised-only admission HOLD is not productive gameplay.
+  // Keep the heartbeat unhealthy and continue lease/health/proof checks, but
+  // never treat the deliberate safety hold as a reason to retry Recovery.
+  function setGameplayHold(reason=null){
+    const next=typeof reason==='string'&&reason.trim()?reason.trim():null;
+    if(next!==gameplayHold)gameplayHoldAlerted=null;
+    gameplayHold=next;
+    // Propagate the HOLD to the heartbeat used by lifecycle and runtime
+    // proof publication, not just the local supervisor display field.
+    if(typeof heartbeat.setProgressHold==='function'){
+      heartbeat.setProgressHold(name,gameplayHold);
+    }
+    return{held:gameplayHold!==null,reason:gameplayHold};
+  }
+
+  async function alert(event,severity,detail,data=null){
+    if(!alertManager||typeof alertManager.publish!=='function')return null;
+    return alertManager.publish({
+      id:'v3-core:'+name+':'+event+':'+String(Number(now())),
+      kind:'V3_CORE_SUPERVISION',
+      event,
+      severity,
+      title:'V3 Core '+event,
+      body:name+' | '+String(detail||event),
+      character:name,
+      requires_action:severity==='error',
+      at:Number(now()),
+      data:clone(data)
+    });
+  }
+
+  function recoveryDue(){
+    if(lastRecoveryAt==null)return true;
+    return Number(now())-Number(lastRecoveryAt)>=Math.max(1000,Number(recoveryRetryMs)||15000);
+  }
+
+  async function runProgressRecovery(hb,life){
+    let result=null;
+    if(recoveryExecutor&&typeof recoveryExecutor.recover==='function'){
+      result=await recoveryExecutor.recover('state',{
+        reason:'PRODUCTIVE_PROGRESS_STALE',
+        character:name,
+        heartbeat:clone(hb),
+        lifecycle:clone(life)
+      });
+    }else{
+      const plan=recovery&&typeof recovery.request==='function'?recovery.request('state'):null;
+      result=plan?{ok:plan.ok,executed:false,scope:'state',action:plan.action,plan}:null;
+    }
+    lastRecoveryAt=Number(now());
+    lastRecoveryResult=clone(result);
+    return result;
+  }
+
+  async function tick(){
+    if(ticking)return{ok:false,error:'SUPERVISOR_TICK_BUSY'};
+    ticking=true;
+    try{
+      tickCount++;
+      lastTickAt=Number(now());
+
+      const renewed=await lease.renew();
+      if(!renewed.ok){
+        lastError=renewed.error||'FRAME_LEASE_LOST';
+        lifecycle.fail(name,lastError);
+        await alert('FRAME_LEASE_LOST','error',lastError);
+        await proof.publish();
+        return{ok:false,error:lastError,action:'FAIL_CLOSED'};
+      }
+
+      heartbeat.controllerBeat(name,{source:'CoreSupervisor',tick:tickCount});
+
+      let modules=null;
+      if(moduleSupervisor&&typeof moduleSupervisor.healthAll==='function'){
+        modules=await moduleSupervisor.healthAll({character:name});
+      }
+
+      const life=lifecycle.status(name);
+      const hb=heartbeat.status(name);
+
+      if(gameplayHold!==null){
+        // Publish at most one actionable alert per hold reason. In
+        // particular, no 15s STOP_AND_ALERT recovery-exhausted loops.
+        if(gameplayHoldAlerted!==gameplayHold){
+          await alert('SUPERVISED_GAMEPLAY_HELD','error',gameplayHold,
+            {reason:gameplayHold,productive:false,recovery_disabled:true});
+          gameplayHoldAlerted=gameplayHold;
+        }
+        productivityAlerted=false;
+        lastRecoveryAt=null;
+        lastRecoveryResult=null;
+      }else if(life.stage==='ACTIVE'&&life.active===true&&!hb.productive){
+        let rec=null;
+        if(recoveryDue())rec=await runProgressRecovery(hb,life);
+
+        if(rec&&rec.deferred===true){
+          productivityAlerted=false;
+        }else if(!productivityAlerted){
+          productivityAlerted=true;
+          await alert(
+            'PRODUCTIVE_PROGRESS_STALE',
+            'error',
+            rec&&rec.action||'STATE_STALLED',
+            {recovery:rec,heartbeat:hb,lifecycle:life}
+          );
+        }else if(rec&&rec.action==='STOP_AND_ALERT'){
+          await alert('PRODUCTIVE_PROGRESS_RECOVERY_EXHAUSTED','error',rec.error||'RECOVERY_EXHAUSTED',{recovery:rec});
+        }
+      }else if(hb.productive){
+        if(productivityAlerted||lastRecoveryAt!=null){
+          if(recoveryExecutor&&typeof recoveryExecutor.reset==='function')recoveryExecutor.reset();
+        }
+        productivityAlerted=false;
+        lastRecoveryAt=null;
+        lastRecoveryResult=null;
+      }
+
+      const runtimeProof=await proof.publish();
+      lastError=null;
+      return{
+        ok:true,
+        tick:tickCount,
+        lifecycle:life.stage,
+        productive:hb.productive,
+        gameplay_hold:gameplayHold,
+        modules,
+        recovery:lastRecoveryResult,
+        runtime_proof:runtimeProof
+      };
+    }catch(error){
+      lastError=String(error&&error.message||error);
+      lifecycle.fail(name,lastError);
+      await alert('SUPERVISOR_ERROR','error',lastError);
+      try{await proof.publish();}catch{}
+      return{ok:false,error:lastError,action:'FAIL_CLOSED'};
+    }finally{
+      ticking=false;
+    }
+  }
+
+  function start(){
+    if(running)return{ok:true,already_running:true};
+    running=true;
+    timer=setIntervalFn(()=>{void tick();},Math.max(1000,Number(intervalMs)||5000));
+    return{ok:true,interval_ms:Math.max(1000,Number(intervalMs)||5000)};
+  }
+
+  function stop(){
+    if(timer)clearIntervalFn(timer);
+    timer=null;
+    running=false;
+    return{ok:true};
+  }
+
+  function status(){
+    return{
+      character:name,
+      running,
+      tick_count:tickCount,
+      last_tick_at:lastTickAt,
+      last_error:lastError,
+      productivity_alerted:productivityAlerted,
+      last_recovery_at:lastRecoveryAt,
+      last_recovery_result:clone(lastRecoveryResult),
+      gameplay_hold:gameplayHold,
+      gameplay_hold_alerted:gameplayHoldAlerted
+    };
+  }
+
+  return{start,stop,tick,status,setGameplayHold};
+}
+
+module.exports={createCoreSupervisor};
+
+},{}],
+"ligaments/combat/CombatService.js":[function(require,module,exports){
+'use strict';
+
+function clone(v){return v==null?v:JSON.parse(JSON.stringify(v));}
+
+function createCombatService({arbiter,targeting,adapter}={}){
+  if(!arbiter||typeof arbiter.acquire!=='function')throw new Error('COMBAT_ARBITER_REQUIRED');
+  if(!targeting||typeof targeting.authorize!=='function')throw new Error('COMBAT_TARGETING_REQUIRED');
+  if(!adapter||typeof adapter.attack!=='function')throw new Error('COMBAT_ADAPTER_REQUIRED');
+
+  function acquire(owner,{priority=0}={}){
+    return arbiter.acquire('COMBAT',String(owner||''),{priority,allowPreempt:true});
+  }
+  function release(owner){return arbiter.release('COMBAT',String(owner||''));}
+  function owner(){return arbiter.owner('COMBAT');}
+
+  async function attack(requestOwner,targetId){
+    const who=String(requestOwner||''),id=String(targetId||'');
+    const current=owner();
+    if(!current||current.owner!==who)return{ok:false,error:'COMBAT_NOT_OWNED',owner:current};
+    const auth=targeting.authorize(who,id);
+    if(!auth.ok)return{ok:false,error:auth.error,target:auth.target||null};
+    const result=await adapter.attack(id);
+    return{ok:!(result&&result.ok===false),result:clone(result),target:id};
+  }
+
+  return{acquire,release,owner,attack};
+}
+
+module.exports={createCombatService};
+
+},{}],
+"ligaments/combat/FighterActionExecutor.js":[function(require,module,exports){
+'use strict';
+
+function clone(v){return v==null?v:JSON.parse(JSON.stringify(v));}
+
+function createFighterActionExecutor({combat,gear,skills,combatOwner='FARM'}={}){
+  if(!combat||typeof combat.attack!=='function')throw new Error('FIGHTER_ACTION_COMBAT_REQUIRED');
+  if(!gear||typeof gear.equipLoadout!=='function')throw new Error('FIGHTER_ACTION_GEAR_REQUIRED');
+  if(!skills||typeof skills.use!=='function')throw new Error('FIGHTER_ACTION_SKILLS_REQUIRED');
+
+  async function doAttack(action,trace){
+    const attacked=await combat.attack(combatOwner,String(action.target||''));
+    trace.push({step:'ATTACK',target:String(action.target||''),result:clone(attacked)});
+    return attacked;
+  }
+
+  async function execute(plan={}){
+    const trace=[];
+    const rotation=plan.rotation||null;
+    const loadout=rotation&&rotation.loadout||null;
+    const actions=(Array.isArray(plan.actions)?plan.actions:[]).filter(Boolean);
+    const attacks=actions.filter(x=>x.kind==='ATTACK');
+    // Spells.js emits validated {skill,...} requests rather than kind=USE_SKILL.
+    // Execute both V3 action shapes; never silently drop Taunt/Stomp/Agitate.
+    const skillActions=actions.filter(x=>x.kind==='USE_SKILL'||(!x.kind&&typeof x.skill==='string'));
+    const cleaveHeartbeatFirst=!!(
+      rotation &&
+      ['CLEAVE_PREP','CLEAVE_BURST'].includes(String(rotation.phase||'')) &&
+      attacks.length
+    );
+
+    // During the Cleave side of the cycle, preserve the normal-attack heartbeat
+    // before spending time on a weapon transition. Sugar phases are the inverse:
+    // gear first so the Lolipop can proc Sugar Rush or dual VHammers can burn it.
+    if(cleaveHeartbeatFirst){
+      for(const action of attacks){
+        const attacked=await doAttack(action,trace);
+        if(attacked&&attacked.ok===false&&['TARGET_NOT_VISIBLE','TARGET_NOT_AUTHORIZED','COMBAT_NOT_OWNED'].includes(attacked.error)){
+          return{ok:false,error:attacked.error,trace};
+        }
+      }
+    }
+
+    if(loadout){
+      const geared=await gear.equipLoadout('FIGHTER_ACTION',loadout);
+      trace.push({step:'GEAR',result:clone(geared)});
+      if(!geared||geared.ok!==true){
+        return{ok:false,error:geared&&geared.error||'FIGHTER_GEAR_FAILED',trace};
+      }
+    }
+
+    if(!cleaveHeartbeatFirst){
+      for(const action of attacks){
+        const attacked=await doAttack(action,trace);
+        if(attacked&&attacked.ok===false&&['TARGET_NOT_VISIBLE','TARGET_NOT_AUTHORIZED','COMBAT_NOT_OWNED'].includes(attacked.error)){
+          return{ok:false,error:attacked.error,trace};
+        }
+      }
+    }
+
+    for(const action of skillActions){
+      const skill=String(action.skill||action.name||'');
+      if(!skill)return{ok:false,error:'FIGHTER_SKILL_NAME_REQUIRED',trace};
+      const used=await skills.use(skill,action.target==null?null:String(action.target));
+      trace.push({step:'SKILL',skill,target:action.target==null?null:String(action.target),result:clone(used)});
+      if(!used||used.ok!==true){
+        return{ok:false,error:used&&used.error||'FIGHTER_SKILL_FAILED',skill,trace};
+      }
+    }
+
+    return{
+      ok:true,
+      trace,
+      attackCount:trace.filter(x=>x.step==='ATTACK'&&x.result&&x.result.ok===true).length,
+      skills:trace.filter(x=>x.step==='SKILL'&&x.result&&x.result.ok===true).map(x=>x.skill),
+      gearVerified:!loadout||trace.some(x=>x.step==='GEAR'&&x.result&&x.result.verified===true)
+    };
+  }
+
+  return{execute};
+}
+
+module.exports={createFighterActionExecutor};
+
+},{}],
+"ligaments/crafting/RecipeIntelligence.js":[function(require,module,exports){
+'use strict';
+
+/*
+ * V3 Recipe Intelligence
+ *
+ * Canonical recipe snapshot generated from:
+ *   kaansoral/adventureland_mongodb/design/recipes.js
+ * Source blob SHA: 656a57170596357e73c42c58a86fd6b4b2c901d7
+ *
+ * Pure data/intelligence only:
+ * - no raw Adventure.Land actions
+ * - no movement
+ * - no bank mutation
+ * - no automatic crafting
+ */
+
+const SOURCE=Object.freeze({
+  repository:'kaansoral/adventureland_mongodb',
+  path:'design/recipes.js',
+  blobSha:'656a57170596357e73c42c58a86fd6b4b2c901d7'
+});
+
+const RECIPES={
+  "djinncrown": {
+    "output": "djinncrown",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 80,
+        "item": "rimeglass",
+        "level": null
+      },
+      {
+        "quantity": 8,
+        "item": "lspores",
+        "level": null
+      },
+      {
+        "quantity": 2,
+        "item": "essenceoffrost",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "helmet",
+        "level": 0
+      }
+    ],
+    "cost": 400000,
+    "quest": null
+  },
+  "covemantle": {
+    "output": "covemantle",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 120,
+        "item": "rimeglass",
+        "level": null
+      },
+      {
+        "quantity": 12,
+        "item": "spidersilk",
+        "level": null
+      },
+      {
+        "quantity": 4,
+        "item": "feather1",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "cape",
+        "level": 0
+      }
+    ],
+    "cost": 400000,
+    "quest": null
+  },
+  "stillwaterlens": {
+    "output": "stillwaterlens",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 240,
+        "item": "rimeglass",
+        "level": null
+      },
+      {
+        "quantity": 6,
+        "item": "gemfragment",
+        "level": null
+      },
+      {
+        "quantity": 8,
+        "item": "seashell",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "orbofint",
+        "level": 0
+      }
+    ],
+    "cost": 800000,
+    "quest": null
+  },
+  "sixcake": {
+    "output": "sixcake",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "slice_strawberry",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "slice_citrus",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "slice_honey",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "slice_mint",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "slice_blueberry",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "slice_nightberry",
+        "level": null
+      }
+    ],
+    "cost": 100000,
+    "quest": "anniversary_baker"
+  },
+  "candleward": {
+    "output": "candleward",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "sixcake",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "shield",
+        "level": 0
+      },
+      {
+        "quantity": 3,
+        "item": "bronzeingot",
+        "level": null
+      },
+      {
+        "quantity": 40,
+        "item": "leather",
+        "level": null
+      }
+    ],
+    "cost": 2000000,
+    "quest": "anniversary_baker"
+  },
+  "guestbook": {
+    "output": "guestbook",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "sixcake",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "wbook0",
+        "level": 0
+      },
+      {
+        "quantity": 1,
+        "item": "ink",
+        "level": null
+      },
+      {
+        "quantity": 2,
+        "item": "voidthread",
+        "level": null
+      },
+      {
+        "quantity": 30,
+        "item": "drapes",
+        "level": null
+      }
+    ],
+    "cost": 2000000,
+    "quest": "anniversary_baker"
+  },
+  "paradequiver": {
+    "output": "paradequiver",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "sixcake",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "quiver",
+        "level": 0
+      },
+      {
+        "quantity": 6,
+        "item": "stormfeather",
+        "level": null
+      },
+      {
+        "quantity": 40,
+        "item": "leather",
+        "level": null
+      }
+    ],
+    "cost": 2000000,
+    "quest": "anniversary_baker"
+  },
+  "homecominghelm": {
+    "output": "homecominghelm",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "sixcake",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "helmet1",
+        "level": 0
+      },
+      {
+        "quantity": 2,
+        "item": "bronzeingot",
+        "level": null
+      },
+      {
+        "quantity": 20,
+        "item": "drapes",
+        "level": null
+      }
+    ],
+    "cost": 2000000,
+    "quest": "anniversary_baker"
+  },
+  "homecomingcoat": {
+    "output": "homecomingcoat",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "sixcake",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "coat1",
+        "level": 0
+      },
+      {
+        "quantity": 3,
+        "item": "bronzeingot",
+        "level": null
+      },
+      {
+        "quantity": 60,
+        "item": "drapes",
+        "level": null
+      }
+    ],
+    "cost": 2000000,
+    "quest": "anniversary_baker"
+  },
+  "homecomingcape": {
+    "output": "homecomingcape",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "sixcake",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "cape",
+        "level": 0
+      },
+      {
+        "quantity": 4,
+        "item": "voidthread",
+        "level": null
+      },
+      {
+        "quantity": 80,
+        "item": "drapes",
+        "level": null
+      }
+    ],
+    "cost": 2000000,
+    "quest": "anniversary_baker"
+  },
+  "reunionbow": {
+    "output": "reunionbow",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 2,
+        "item": "sixcake",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "t2bow",
+        "level": 0
+      },
+      {
+        "quantity": 20,
+        "item": "stormfeather",
+        "level": null
+      },
+      {
+        "quantity": 4,
+        "item": "essenceofether",
+        "level": null
+      }
+    ],
+    "cost": 4000000,
+    "quest": "anniversary_baker"
+  },
+  "keepsakependant": {
+    "output": "keepsakependant",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "sixcake",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "hpamulet",
+        "level": 0
+      },
+      {
+        "quantity": 1,
+        "item": "bronzeingot",
+        "level": null
+      },
+      {
+        "quantity": 20,
+        "item": "drapes",
+        "level": null
+      }
+    ],
+    "cost": 1000000,
+    "quest": "anniversary_baker"
+  },
+  "makeawishjar": {
+    "output": "cxjar",
+    "outputData": "makeawish",
+    "items": [
+      {
+        "quantity": 1,
+        "item": "sixcake",
+        "level": null
+      }
+    ],
+    "cost": 250000,
+    "quest": "anniversary_baker"
+  },
+  "basketofeggs": {
+    "output": "basketofeggs",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "egg0",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "egg1",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "egg2",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "egg3",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "egg4",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "egg5",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "egg6",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "egg7",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "egg8",
+        "level": null
+      }
+    ],
+    "cost": 100,
+    "quest": null
+  },
+  "xbox": {
+    "output": "xbox",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "x0",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "x1",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "x2",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "x3",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "x4",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "x5",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "x6",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "x7",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "x8",
+        "level": null
+      }
+    ],
+    "cost": 1200,
+    "quest": null
+  },
+  "carrotsword": {
+    "output": "carrotsword",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "blade",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "carrot",
+        "level": null
+      }
+    ],
+    "cost": 500,
+    "quest": null
+  },
+  "wblade": {
+    "output": "wblade",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "stick",
+        "level": 9
+      },
+      {
+        "quantity": 1,
+        "item": "blade",
+        "level": 9
+      },
+      {
+        "quantity": 800,
+        "item": "essenceoffrost",
+        "level": null
+      }
+    ],
+    "cost": 24000000,
+    "quest": null
+  },
+  "rod": {
+    "output": "rod",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "staff",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "spidersilk",
+        "level": null
+      }
+    ],
+    "cost": 100,
+    "quest": null
+  },
+  "pickaxe": {
+    "output": "pickaxe",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "staff",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "spidersilk",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "blade",
+        "level": null
+      }
+    ],
+    "cost": 100,
+    "quest": null
+  },
+  "stealthcape": {
+    "output": "stealthcape",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "bcape",
+        "level": 7
+      },
+      {
+        "quantity": 5,
+        "item": "shadowstone",
+        "level": null
+      },
+      {
+        "quantity": 200,
+        "item": "essenceofnature",
+        "level": null
+      },
+      {
+        "quantity": 1000,
+        "item": "cscale",
+        "level": null
+      }
+    ],
+    "cost": 2000000,
+    "quest": null
+  },
+  "cake": {
+    "output": "cake",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 10,
+        "item": "whiteegg",
+        "level": null
+      }
+    ],
+    "cost": 5,
+    "quest": null
+  },
+  "bfangamulet": {
+    "output": "bfangamulet",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "bfang",
+        "level": null
+      },
+      {
+        "quantity": 5000,
+        "item": "bwing",
+        "level": null
+      }
+    ],
+    "cost": 4000000,
+    "quest": null
+  },
+  "wingedboots": {
+    "output": "wingedboots",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "shoes",
+        "level": null
+      },
+      {
+        "quantity": 20,
+        "item": "feather0",
+        "level": null
+      }
+    ],
+    "cost": 120000,
+    "quest": null
+  },
+  "fierygloves": {
+    "output": "fierygloves",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "gloves",
+        "level": null
+      },
+      {
+        "quantity": 20,
+        "item": "feather0",
+        "level": null
+      },
+      {
+        "quantity": 2,
+        "item": "essenceoffire",
+        "level": null
+      }
+    ],
+    "cost": 120000,
+    "quest": null
+  },
+  "fclaw": {
+    "output": "fclaw",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "claw",
+        "level": null
+      },
+      {
+        "quantity": 2,
+        "item": "essenceoffrost",
+        "level": null
+      }
+    ],
+    "cost": 20000,
+    "quest": null
+  },
+  "fsword": {
+    "output": "fsword",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "blade",
+        "level": null
+      },
+      {
+        "quantity": 2,
+        "item": "essenceoffrost",
+        "level": null
+      }
+    ],
+    "cost": 20000,
+    "quest": null
+  },
+  "froststaff": {
+    "output": "froststaff",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "staff",
+        "level": null
+      },
+      {
+        "quantity": 2,
+        "item": "essenceoffrost",
+        "level": null
+      }
+    ],
+    "cost": 20000,
+    "quest": null
+  },
+  "snowflakes": {
+    "output": "snowflakes",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "throwingstars",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "essenceoffrost",
+        "level": null
+      }
+    ],
+    "cost": 20000,
+    "quest": null
+  },
+  "frostbow": {
+    "output": "frostbow",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "bow",
+        "level": null
+      },
+      {
+        "quantity": 3,
+        "item": "essenceoffrost",
+        "level": null
+      }
+    ],
+    "cost": 40000,
+    "quest": null
+  },
+  "firebow": {
+    "output": "firebow",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "bow",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "essenceoffire",
+        "level": null
+      }
+    ],
+    "cost": 20000,
+    "quest": null
+  },
+  "fireblade": {
+    "output": "fireblade",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "blade",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "essenceoffire",
+        "level": null
+      }
+    ],
+    "cost": 20000,
+    "quest": null
+  },
+  "firestaff": {
+    "output": "firestaff",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "staff",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "essenceoffire",
+        "level": null
+      }
+    ],
+    "cost": 20000,
+    "quest": null
+  },
+  "firestars": {
+    "output": "firestars",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "throwingstars",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "essenceoffire",
+        "level": null
+      }
+    ],
+    "cost": 180000,
+    "quest": null
+  },
+  "heartwood": {
+    "output": "heartwood",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "woodensword",
+        "level": 8
+      },
+      {
+        "quantity": 1,
+        "item": "nheart",
+        "level": null
+      }
+    ],
+    "cost": 120000000,
+    "quest": null
+  },
+  "offeringx": {
+    "output": "offeringx",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 10,
+        "item": "offering",
+        "level": null
+      },
+      {
+        "quantity": 1200,
+        "item": "essenceofnature",
+        "level": null
+      },
+      {
+        "quantity": 200,
+        "item": "essenceoflife",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "essenceofgreed",
+        "level": null
+      }
+    ],
+    "cost": 32000000,
+    "quest": null
+  },
+  "computer": {
+    "output": "computer",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "networkcard",
+        "level": null
+      },
+      {
+        "quantity": 8,
+        "item": "qubics",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "platinumnugget",
+        "level": null
+      },
+      {
+        "quantity": 12,
+        "item": "goldnugget",
+        "level": null
+      },
+      {
+        "quantity": 100,
+        "item": "electronics",
+        "level": null
+      }
+    ],
+    "cost": 120000000,
+    "quest": null
+  },
+  "supercomputer": {
+    "output": "supercomputer",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "computer",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "tracker",
+        "level": null
+      },
+      {
+        "quantity": 3,
+        "item": "qubics",
+        "level": null
+      },
+      {
+        "quantity": 2000,
+        "item": "electronics",
+        "level": null
+      }
+    ],
+    "cost": 4800000000,
+    "quest": null
+  },
+  "dartgun": {
+    "output": "dartgun",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "blade",
+        "level": 9
+      },
+      {
+        "quantity": 12,
+        "item": "qubics",
+        "level": null
+      },
+      {
+        "quantity": 4,
+        "item": "platinumnugget",
+        "level": null
+      },
+      {
+        "quantity": 20,
+        "item": "goldnugget",
+        "level": null
+      }
+    ],
+    "cost": 32000000,
+    "quest": null
+  },
+  "bronzeingot": {
+    "output": "bronzeingot",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 16,
+        "item": "bronzenugget",
+        "level": null
+      }
+    ],
+    "cost": 360000,
+    "quest": null
+  },
+  "goldingot": {
+    "output": "goldingot",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 12,
+        "item": "goldnugget",
+        "level": null
+      }
+    ],
+    "cost": 3600000,
+    "quest": null
+  },
+  "platinumingot": {
+    "output": "platinumingot",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 8,
+        "item": "platinumnugget",
+        "level": null
+      }
+    ],
+    "cost": 36000000,
+    "quest": null
+  },
+  "candycanesword": {
+    "output": "candycanesword",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "blade",
+        "level": 7
+      },
+      {
+        "quantity": 1,
+        "item": "candycane",
+        "level": null
+      }
+    ],
+    "cost": 480000,
+    "quest": null
+  },
+  "merry": {
+    "output": "merry",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "bow",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "candycane",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "mistletoe",
+        "level": null
+      }
+    ],
+    "cost": 480000,
+    "quest": null
+  },
+  "harpybow": {
+    "output": "harpybow",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "t2bow",
+        "level": null
+      },
+      {
+        "quantity": 100,
+        "item": "feather1",
+        "level": null
+      }
+    ],
+    "cost": 1640000,
+    "quest": null
+  },
+  "gstaff": {
+    "output": "gstaff",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "staff",
+        "level": 8
+      },
+      {
+        "quantity": 1,
+        "item": "essenceofgreed",
+        "level": null
+      }
+    ],
+    "cost": 180000,
+    "quest": null
+  },
+  "pouchbow": {
+    "output": "pouchbow",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "bow",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "smoke",
+        "level": null
+      }
+    ],
+    "cost": 180000,
+    "quest": null
+  },
+  "ornamentstaff": {
+    "output": "ornamentstaff",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "staff",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "ornament",
+        "level": null
+      },
+      {
+        "quantity": 20,
+        "item": "confetti",
+        "level": null
+      }
+    ],
+    "cost": 120000,
+    "quest": null
+  },
+  "charmer": {
+    "output": "charmer",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "goldnugget",
+        "level": null
+      },
+      {
+        "quantity": 20,
+        "item": "gem1",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "emptyheart",
+        "level": null
+      }
+    ],
+    "cost": 80000,
+    "quest": null
+  },
+  "ctristone": {
+    "output": "ctristone",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "strring",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "intring",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "dexring",
+        "level": null
+      },
+      {
+        "quantity": 10,
+        "item": "vitscroll",
+        "level": null
+      }
+    ],
+    "cost": 20000,
+    "quest": null
+  },
+  "cclaw": {
+    "output": "cclaw",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "claw",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "crabclaw",
+        "level": null
+      }
+    ],
+    "cost": 24000,
+    "quest": null
+  },
+  "slimestaff": {
+    "output": "slimestaff",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "staff",
+        "level": null
+      },
+      {
+        "quantity": 10,
+        "item": "gslime",
+        "level": null
+      }
+    ],
+    "cost": 24000,
+    "quest": null
+  },
+  "mushroomstaff": {
+    "output": "mushroomstaff",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "staff",
+        "level": null
+      },
+      {
+        "quantity": 2,
+        "item": "smush",
+        "level": null
+      }
+    ],
+    "cost": 24000,
+    "quest": null
+  },
+  "wcap": {
+    "output": "wcap",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 50,
+        "item": "beewings",
+        "level": null
+      },
+      {
+        "quantity": 3,
+        "item": "gslime",
+        "level": null
+      }
+    ],
+    "cost": 0,
+    "quest": "mcollector"
+  },
+  "wgloves": {
+    "output": "wgloves",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 60,
+        "item": "beewings",
+        "level": null
+      },
+      {
+        "quantity": 20,
+        "item": "spores",
+        "level": null
+      }
+    ],
+    "cost": 0,
+    "quest": "mcollector"
+  },
+  "vowkeepergloves": {
+    "output": "vowkeepergloves",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 60,
+        "item": "beewings",
+        "level": null
+      },
+      {
+        "quantity": 30,
+        "item": "spores",
+        "level": null
+      },
+      {
+        "quantity": 2,
+        "item": "crabclaw",
+        "level": null
+      }
+    ],
+    "cost": 0,
+    "quest": "mcollector"
+  },
+  "wbreeches": {
+    "output": "wbreeches",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 10,
+        "item": "crabclaw",
+        "level": null
+      },
+      {
+        "quantity": 100,
+        "item": "spores",
+        "level": null
+      }
+    ],
+    "cost": 0,
+    "quest": "mcollector"
+  },
+  "wattire": {
+    "output": "wattire",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 100,
+        "item": "gslime",
+        "level": null
+      },
+      {
+        "quantity": 200,
+        "item": "crabclaw",
+        "level": null
+      }
+    ],
+    "cost": 0,
+    "quest": "mcollector"
+  },
+  "wshoes": {
+    "output": "wshoes",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 5,
+        "item": "frogt",
+        "level": null
+      },
+      {
+        "quantity": 500,
+        "item": "beewings",
+        "level": null
+      },
+      {
+        "quantity": 100,
+        "item": "crabclaw",
+        "level": null
+      }
+    ],
+    "cost": 0,
+    "quest": "mcollector"
+  },
+  "quiver": {
+    "output": "quiver",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "ascale",
+        "level": null
+      },
+      {
+        "quantity": 200,
+        "item": "beewings",
+        "level": null
+      }
+    ],
+    "cost": 0,
+    "quest": "mcollector"
+  },
+  "orbg": {
+    "output": "orbg",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "ascale",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "pleather",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "cscale",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "bfur",
+        "level": null
+      }
+    ],
+    "cost": 0,
+    "quest": "mcollector"
+  },
+  "orba": {
+    "output": "orba",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "orboffire",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "orboffrost",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "orbofplague",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "orbofresolve",
+        "level": null
+      }
+    ],
+    "cost": 0,
+    "quest": "mcollector"
+  },
+  "armorring": {
+    "output": "armorring",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "snakefang",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "lotusf",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "vitring",
+        "level": 2
+      }
+    ],
+    "cost": 0,
+    "quest": "mcollector"
+  },
+  "resistancering": {
+    "output": "resistancering",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "ink",
+        "level": null
+      },
+      {
+        "quantity": 5,
+        "item": "ascale",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "vitring",
+        "level": 2
+      }
+    ],
+    "cost": 0,
+    "quest": "mcollector"
+  },
+  "lbelt": {
+    "output": "lbelt",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 100,
+        "item": "bfur",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "hpbelt",
+        "level": 2
+      }
+    ],
+    "cost": 0,
+    "quest": "mcollector"
+  },
+  "stinger": {
+    "output": "stinger",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 12,
+        "item": "feather0",
+        "level": null
+      }
+    ],
+    "cost": 0,
+    "quest": "mcollector"
+  },
+  "hbow": {
+    "output": "hbow",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 40,
+        "item": "dstones",
+        "level": null
+      },
+      {
+        "quantity": 2,
+        "item": "pleather",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "feather0",
+        "level": null
+      }
+    ],
+    "cost": 0,
+    "quest": "mcollector"
+  },
+  "snakeoil": {
+    "output": "snakeoil",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 40,
+        "item": "dstones",
+        "level": null
+      },
+      {
+        "quantity": 9000,
+        "item": "rattail",
+        "level": null
+      }
+    ],
+    "cost": 0,
+    "quest": "witch"
+  },
+  "elixirfires": {
+    "output": "elixirfires",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "cshell",
+        "level": null
+      },
+      {
+        "quantity": 2000,
+        "item": "hpot0",
+        "level": null
+      }
+    ],
+    "cost": 0,
+    "quest": "witch"
+  },
+  "elixirfzres": {
+    "output": "elixirfzres",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 50,
+        "item": "bfur",
+        "level": null
+      },
+      {
+        "quantity": 10,
+        "item": "mpot0",
+        "level": null
+      }
+    ],
+    "cost": 0,
+    "quest": "witch"
+  },
+  "elixirpnres": {
+    "output": "elixirpnres",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 500,
+        "item": "bwing",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "hpot0",
+        "level": null
+      }
+    ],
+    "cost": 0,
+    "quest": "witch"
+  },
+  "daggerofthedead": {
+    "output": "daggerofthedead",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "mbones",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "wand",
+        "level": null
+      }
+    ],
+    "cost": 24000,
+    "quest": null
+  },
+  "spearofthedead": {
+    "output": "spearofthedead",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 2,
+        "item": "mbones",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "spear",
+        "level": null
+      }
+    ],
+    "cost": 24000,
+    "quest": null
+  },
+  "staffofthedead": {
+    "output": "staffofthedead",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "mbones",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "staff",
+        "level": null
+      }
+    ],
+    "cost": 120000,
+    "quest": null
+  },
+  "bowofthedead": {
+    "output": "bowofthedead",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "mbones",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "bow",
+        "level": null
+      }
+    ],
+    "cost": 120000,
+    "quest": null
+  },
+  "swordofthedead": {
+    "output": "swordofthedead",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "mbones",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "sword",
+        "level": null
+      }
+    ],
+    "cost": 24000,
+    "quest": null
+  },
+  "bataxe": {
+    "output": "bataxe",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "cryptkey",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "wbasher",
+        "level": 7
+      },
+      {
+        "quantity": 1,
+        "item": "essenceoflife",
+        "level": null
+      }
+    ],
+    "cost": 120000,
+    "quest": null
+  },
+  "maceofthedead": {
+    "output": "maceofthedead",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "mbones",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "wbasher",
+        "level": null
+      }
+    ],
+    "cost": 240000,
+    "quest": null
+  },
+  "pmaceofthedead": {
+    "output": "pmaceofthedead",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "mbones",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "pmace",
+        "level": null
+      }
+    ],
+    "cost": 24000,
+    "quest": null
+  },
+  "weaver": {
+    "output": "weaver",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "bow",
+        "level": null
+      },
+      {
+        "quantity": 30,
+        "item": "cocoon",
+        "level": null
+      }
+    ],
+    "cost": 75000,
+    "quest": null
+  },
+  "cocoon": {
+    "output": "cocoon",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1000,
+        "item": "spidersilk",
+        "level": null
+      }
+    ],
+    "cost": 2500,
+    "quest": null
+  },
+  "elixirint1": {
+    "output": "elixirint1",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 10,
+        "item": "elixirint0",
+        "level": null
+      }
+    ],
+    "cost": 1000,
+    "quest": null
+  },
+  "elixirdex1": {
+    "output": "elixirdex1",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 10,
+        "item": "elixirdex0",
+        "level": null
+      }
+    ],
+    "cost": 1000,
+    "quest": null
+  },
+  "elixirvit1": {
+    "output": "elixirvit1",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 10,
+        "item": "elixirvit0",
+        "level": null
+      }
+    ],
+    "cost": 1000,
+    "quest": null
+  },
+  "elixirstr1": {
+    "output": "elixirstr1",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 10,
+        "item": "elixirstr0",
+        "level": null
+      }
+    ],
+    "cost": 1000,
+    "quest": null
+  },
+  "elixirint2": {
+    "output": "elixirint2",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 10,
+        "item": "elixirint1",
+        "level": null
+      }
+    ],
+    "cost": 2400,
+    "quest": null
+  },
+  "elixirdex2": {
+    "output": "elixirdex2",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 10,
+        "item": "elixirdex1",
+        "level": null
+      }
+    ],
+    "cost": 2400,
+    "quest": null
+  },
+  "elixirvit2": {
+    "output": "elixirvit2",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 10,
+        "item": "elixirvit1",
+        "level": null
+      }
+    ],
+    "cost": 2400,
+    "quest": null
+  },
+  "elixirstr2": {
+    "output": "elixirstr2",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 10,
+        "item": "elixirstr1",
+        "level": null
+      }
+    ],
+    "cost": 2400,
+    "quest": null
+  },
+  "threadneedle": {
+    "output": "threadneedle",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "blade",
+        "level": 5
+      },
+      {
+        "quantity": 20,
+        "item": "spidersilk",
+        "level": null
+      },
+      {
+        "quantity": 20,
+        "item": "ashleaf",
+        "level": null
+      }
+    ],
+    "cost": 120000,
+    "quest": null
+  },
+  "brinefang": {
+    "output": "brinefang",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "blade",
+        "level": 7
+      },
+      {
+        "quantity": 120,
+        "item": "reefglass",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "cshell",
+        "level": null
+      }
+    ],
+    "cost": 180000,
+    "quest": null
+  },
+  "molehook": {
+    "output": "molehook",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "pickaxe",
+        "level": 5
+      },
+      {
+        "quantity": 40,
+        "item": "gemfragment",
+        "level": null
+      },
+      {
+        "quantity": 2,
+        "item": "bronzenugget",
+        "level": null
+      }
+    ],
+    "cost": 90000,
+    "quest": null
+  },
+  "cinderwand": {
+    "output": "cinderwand",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "wand",
+        "level": 7
+      },
+      {
+        "quantity": 1,
+        "item": "embercore",
+        "level": null
+      },
+      {
+        "quantity": 6,
+        "item": "essenceoffire",
+        "level": null
+      },
+      {
+        "quantity": 40,
+        "item": "ashleaf",
+        "level": null
+      }
+    ],
+    "cost": 240000,
+    "quest": null
+  },
+  "pollenbow": {
+    "output": "pollenbow",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "bow",
+        "level": 7
+      },
+      {
+        "quantity": 60,
+        "item": "beewings",
+        "level": null
+      },
+      {
+        "quantity": 60,
+        "item": "ashleaf",
+        "level": null
+      },
+      {
+        "quantity": 10,
+        "item": "essenceofnature",
+        "level": null
+      }
+    ],
+    "cost": 90000,
+    "quest": null
+  },
+  "rimeknuckles": {
+    "output": "rimeknuckles",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "claw",
+        "level": 7
+      },
+      {
+        "quantity": 1,
+        "item": "frostcore",
+        "level": null
+      },
+      {
+        "quantity": 12,
+        "item": "bfur",
+        "level": null
+      },
+      {
+        "quantity": 4,
+        "item": "essenceoffrost",
+        "level": null
+      }
+    ],
+    "cost": 180000,
+    "quest": null
+  },
+  "lanternshield": {
+    "output": "lanternshield",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "shield",
+        "level": 6
+      },
+      {
+        "quantity": 1,
+        "item": "embercore",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "bronzeingot",
+        "level": null
+      }
+    ],
+    "cost": 240000,
+    "quest": null
+  },
+  "turtleshard": {
+    "output": "turtleshard",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "wshield",
+        "level": 6
+      },
+      {
+        "quantity": 80,
+        "item": "reefglass",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "cshell",
+        "level": null
+      }
+    ],
+    "cost": 100000,
+    "quest": null
+  },
+  "ratkingbuckler": {
+    "output": "ratkingbuckler",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "wshield",
+        "level": 4
+      },
+      {
+        "quantity": 30,
+        "item": "rattail",
+        "level": null
+      },
+      {
+        "quantity": 20,
+        "item": "ashleaf",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "bronzenugget",
+        "level": null
+      }
+    ],
+    "cost": 40000,
+    "quest": null
+  },
+  "stormquiver": {
+    "output": "stormquiver",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "alloyquiver",
+        "level": 5
+      },
+      {
+        "quantity": 80,
+        "item": "stormfeather",
+        "level": null
+      },
+      {
+        "quantity": 8,
+        "item": "essenceofether",
+        "level": null
+      }
+    ],
+    "cost": 500000,
+    "quest": null
+  },
+  "thistlequiver": {
+    "output": "thistlequiver",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "quiver",
+        "level": 5
+      },
+      {
+        "quantity": 10,
+        "item": "pleather",
+        "level": null
+      },
+      {
+        "quantity": 40,
+        "item": "ashleaf",
+        "level": null
+      },
+      {
+        "quantity": 5,
+        "item": "essenceofnature",
+        "level": null
+      }
+    ],
+    "cost": 140000,
+    "quest": null
+  },
+  "scribeorb": {
+    "output": "scribeorb",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "wbook0",
+        "level": 3
+      },
+      {
+        "quantity": 12,
+        "item": "voidthread",
+        "level": null
+      },
+      {
+        "quantity": 50,
+        "item": "bwing",
+        "level": null
+      },
+      {
+        "quantity": 4,
+        "item": "essenceofether",
+        "level": null
+      }
+    ],
+    "cost": 280000,
+    "quest": null
+  },
+  "mossheart": {
+    "output": "mossheart",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "wbook0",
+        "level": 4
+      },
+      {
+        "quantity": 2,
+        "item": "verdantcore",
+        "level": null
+      },
+      {
+        "quantity": 120,
+        "item": "ashleaf",
+        "level": null
+      },
+      {
+        "quantity": 80,
+        "item": "essenceofnature",
+        "level": null
+      }
+    ],
+    "cost": 800000,
+    "quest": null
+  },
+  "emberseal": {
+    "output": "emberseal",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "strring",
+        "level": 2
+      },
+      {
+        "quantity": 1,
+        "item": "embercore",
+        "level": null
+      },
+      {
+        "quantity": 6,
+        "item": "essenceoffire",
+        "level": null
+      }
+    ],
+    "cost": 300000,
+    "quest": null
+  },
+  "glacierseal": {
+    "output": "glacierseal",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "intring",
+        "level": 2
+      },
+      {
+        "quantity": 1,
+        "item": "frostcore",
+        "level": null
+      },
+      {
+        "quantity": 6,
+        "item": "essenceoffrost",
+        "level": null
+      }
+    ],
+    "cost": 300000,
+    "quest": null
+  },
+  "venomband": {
+    "output": "venomband",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "dexring",
+        "level": 2
+      },
+      {
+        "quantity": 1,
+        "item": "verdantcore",
+        "level": null
+      },
+      {
+        "quantity": 12,
+        "item": "poison",
+        "level": null
+      },
+      {
+        "quantity": 4,
+        "item": "snakefang",
+        "level": null
+      }
+    ],
+    "cost": 240000,
+    "quest": null
+  },
+  "saffronloop": {
+    "output": "saffronloop",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "vitearring",
+        "level": 2
+      },
+      {
+        "quantity": 1,
+        "item": "goldnugget",
+        "level": null
+      },
+      {
+        "quantity": 100,
+        "item": "gemfragment",
+        "level": null
+      }
+    ],
+    "cost": 350000,
+    "quest": null
+  },
+  "moonshardearring": {
+    "output": "moonshardearring",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "intearring",
+        "level": 2
+      },
+      {
+        "quantity": 8,
+        "item": "voidthread",
+        "level": null
+      },
+      {
+        "quantity": 40,
+        "item": "bwing",
+        "level": null
+      },
+      {
+        "quantity": 4,
+        "item": "essenceofether",
+        "level": null
+      }
+    ],
+    "cost": 240000,
+    "quest": null
+  },
+  "cloverstud": {
+    "output": "cloverstud",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "vitearring",
+        "level": 2
+      },
+      {
+        "quantity": 1,
+        "item": "verdantcore",
+        "level": null
+      },
+      {
+        "quantity": 40,
+        "item": "ashleaf",
+        "level": null
+      },
+      {
+        "quantity": 40,
+        "item": "spores",
+        "level": null
+      },
+      {
+        "quantity": 5,
+        "item": "gslime",
+        "level
