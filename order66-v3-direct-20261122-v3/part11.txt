@@ -1,0 +1,223 @@
+EAT,createDefensivePvp};
+
+},{}],
+"organs/stand/StandState.js":[function(require,module,exports){
+'use strict';
+
+const clone=v=>v==null?v:JSON.parse(JSON.stringify(v));
+
+function createStandState({adapter,now=Date.now}={}){
+  if(!adapter||typeof adapter.isOpen!=='function'||typeof adapter.open!=='function'||typeof adapter.close!=='function')throw new Error('STAND_ADAPTER_REQUIRED');
+  const state={version:3,state:'STAND',phase:'CLOSED',paused:false,opened_at:null,last_error:null};
+
+  const snapshot=()=>clone(state);
+  // Startup observation is read-only. A merchant's stand may already be
+  // physically open when V3 attaches; assuming CLOSED until an explicit
+  // STAND action causes false STAND_STATE_MISMATCH alerts in BANK/IDLE.
+  async function initialize(){
+    const open=await adapter.isOpen();
+    state.phase=state.paused?'PAUSED':open?'OPEN':'CLOSED';
+    state.last_error=null;
+    return{ok:true,initialized:true,observedOpen:open,status:snapshot()};
+  }
+  async function sync(){
+    const open=await adapter.isOpen();
+    state.phase=open?'OPEN':'CLOSED';
+    return open;
+  }
+  async function start(){
+    if(state.paused)return{ok:false,error:'STAND_PAUSED'};
+    if(await sync())return{ok:true,status:snapshot(),already_open:true};
+    const r=await adapter.open();
+    if(r&&r.ok===false){state.last_error=r.error||'STAND_OPEN_FAILED';return{ok:false,error:state.last_error};}
+    state.phase='OPEN';state.opened_at=Number(now());state.last_error=null;
+    return{ok:true,status:snapshot()};
+  }
+  async function pause(){
+    state.paused=true;
+    if(await adapter.isOpen())await adapter.close();
+    state.phase='PAUSED';
+    return{ok:true,status:snapshot()};
+  }
+  async function resume(){state.paused=false;state.phase='CLOSED';return{ok:true,status:snapshot()};}
+  async function stop(){
+    if(await adapter.isOpen())await adapter.close();
+    state.phase='CLOSED';state.paused=false;
+    return{ok:true,status:snapshot()};
+  }
+  async function health(){
+    const open=await adapter.isOpen();
+    const expected=state.phase==='OPEN';
+    if(expected!==open)return{ok:false,error:'STAND_STATE_MISMATCH',expected,actual:open,status:snapshot()};
+    return{ok:true,status:snapshot()};
+  }
+  async function restore(saved){
+    if(!saved||saved.version!==3||saved.state!=='STAND')throw new Error('STAND_SNAPSHOT_INVALID');
+    Object.assign(state,clone(saved));
+    return{ok:true,status:snapshot()};
+  }
+
+  return{initialize,start,pause,resume,stop,health,snapshot,restore,getStatus:snapshot};
+}
+
+module.exports={createStandState};
+
+},{}],
+"roles/RoleManifest.js":[function(require,module,exports){
+'use strict';
+
+const ROLE_MANIFESTS=Object.freeze({
+  Rentaro:Object.freeze({
+    character:'Rentaro',
+    role:'MERCHANT',
+    required:Object.freeze(['CoreSupervisor']),
+    optional:Object.freeze(['Gear','Inventory','RecipeIntelligence','BankNavigation','BankTravel','GearHandoff','GearProduction','Shop','Bank','Stand','ScanBoss','Events','PvpDefense','MerchantController'])
+  }),
+  Harutora:Object.freeze({
+    character:'Harutora',
+    role:'MAGE',
+    required:Object.freeze(['CoreSupervisor']),
+    optional:Object.freeze(['Gear','PartyCoordination','Targeting','MageCombat','FighterActions','Farm','WorldBoss','ScanBoss','Events','PvpDefense'])
+  }),
+  Hibari:Object.freeze({
+    character:'Hibari',
+    role:'WARRIOR',
+    required:Object.freeze(['CoreSupervisor']),
+    optional:Object.freeze(['Gear','PartyCoordination','Targeting','WarriorCombat','FighterActions','Farm','WorldBoss','ScanBoss','Events','PvpDefense'])
+  }),
+  Souji:Object.freeze({
+    character:'Souji',
+    role:'PRIEST',
+    required:Object.freeze(['CoreSupervisor']),
+    optional:Object.freeze(['Gear','PartyCoordination','Targeting','PriestCombat','FighterActions','Farm','WorldBoss','ScanBoss','Events','PvpDefense'])
+  })
+});
+
+function getRoleManifest(character){
+  const row=ROLE_MANIFESTS[String(character||'')];
+  if(!row)throw new Error('ROLE_MANIFEST_NOT_FOUND:'+String(character||''));
+  return row;
+}
+
+function validateRoleManifest(manifest){
+  if(!manifest||typeof manifest!=='object')return{ok:false,error:'ROLE_MANIFEST_REQUIRED'};
+  if(!manifest.character||!manifest.role)return{ok:false,error:'ROLE_IDENTITY_REQUIRED'};
+  if(!Array.isArray(manifest.required)||!Array.isArray(manifest.optional))return{ok:false,error:'ROLE_MODULE_LIST_REQUIRED'};
+  const all=[...manifest.required,...manifest.optional];
+  const dup=all.find((name,index)=>all.indexOf(name)!==index);
+  if(dup)return{ok:false,error:'ROLE_MODULE_DUPLICATE',module:dup};
+  return{ok:true};
+}
+
+function resolveRoleModules(character,catalog={}){
+  const manifest=getRoleManifest(character);
+  const required=[],optional=[],missingRequired=[],missingOptional=[];
+  for(const name of manifest.required){
+    if(catalog[name])required.push({name,module:catalog[name]});
+    else missingRequired.push(name);
+  }
+  for(const name of manifest.optional){
+    if(catalog[name])optional.push({name,module:catalog[name]});
+    else missingOptional.push(name);
+  }
+  return{
+    ok:missingRequired.length===0,
+    character:manifest.character,
+    role:manifest.role,
+    required,
+    optional,
+    missing_required:missingRequired,
+    missing_optional:missingOptional
+  };
+}
+
+module.exports={ROLE_MANIFESTS,getRoleManifest,validateRoleManifest,resolveRoleModules};
+
+},{}],
+"states/StateRegistry.js":[function(require,module,exports){
+'use strict';
+
+const SAFETY_HIERARCHY=Object.freeze([
+  'EMERGENCY',
+  'RETREAT',
+  'RECOVERY',
+  'PVP_DEFENSE'
+]);
+
+const GAMEPLAY_HIERARCHY=Object.freeze([
+  'WORLD_BOSS',
+  'EVENT',
+  'BANK',
+  'GEAR_PRODUCTION',
+  'STAND',
+  'FARM',
+  'IDLE'
+]);
+
+const MAIN_HIERARCHY=Object.freeze([
+  ...SAFETY_HIERARCHY,
+  ...GAMEPLAY_HIERARCHY
+]);
+
+const STATES=Object.freeze({
+  EMERGENCY:Object.freeze({priority:100,kind:'core',tier:'SAFETY',main:true,movement_owner:'EMERGENCY'}),
+  RETREAT:Object.freeze({priority:95,kind:'core',tier:'SAFETY',main:true,movement_owner:'RETREAT'}),
+  RECOVERY:Object.freeze({priority:90,kind:'core',tier:'SAFETY',main:true,movement_owner:'RECOVERY'}),
+  PVP_DEFENSE:Object.freeze({priority:80,kind:'organ',tier:'SAFETY',main:true,movement_owner:'PVP_DEFENSE'}),
+  WORLD_BOSS:Object.freeze({priority:70,kind:'organ',tier:'GAMEPLAY',main:true,movement_owner:'WORLD_BOSS'}),
+  EVENT:Object.freeze({priority:60,kind:'organ',tier:'GAMEPLAY',main:true,movement_owner:'EVENT'}),
+  BANK:Object.freeze({priority:50,kind:'organ',tier:'GAMEPLAY',main:true,movement_owner:'BANK'}),
+  GEAR_PRODUCTION:Object.freeze({priority:45,kind:'organ',tier:'GAMEPLAY',main:true,movement_owner:'GEAR_PRODUCTION'}),
+  STAND:Object.freeze({priority:40,kind:'organ',tier:'GAMEPLAY',main:true,movement_owner:null}),
+  SCAN_BOSS:Object.freeze({priority:35,kind:'side',tier:'OBSERVATION',main:false,movement_owner:null}),
+  FARM:Object.freeze({priority:20,kind:'organ',tier:'GAMEPLAY',main:true,movement_owner:'FARM'}),
+  IDLE:Object.freeze({priority:0,kind:'core',tier:'GAMEPLAY',main:true,movement_owner:null})
+});
+
+function getState(name){return STATES[String(name||'')]||null;}
+function priority(name){const row=getState(name);return row?row.priority:-1;}
+function isMainState(name){const row=getState(name);return !!(row&&row.main===true);}
+function canPreempt(current,next){
+  if(!isMainState(next))return false;
+  if(String(current||'')==='IDLE')return String(next||'')!=='IDLE';
+  if(!isMainState(current))return false;
+  return priority(next)>priority(current);
+}
+function list(){return Object.entries(STATES).map(([name,value])=>({name,...value}));}
+function mainHierarchy(){return MAIN_HIERARCHY.slice();}
+function gameplayHierarchy(){return GAMEPLAY_HIERARCHY.slice();}
+function safetyHierarchy(){return SAFETY_HIERARCHY.slice();}
+
+module.exports={
+  STATES,
+  SAFETY_HIERARCHY,
+  GAMEPLAY_HIERARCHY,
+  MAIN_HIERARCHY,
+  getState,
+  priority,
+  isMainState,
+  canPreempt,
+  list,
+  mainHierarchy,
+  gameplayHierarchy,
+  safetyHierarchy
+};
+
+},{}]
+},cache=Object.create(null);
+function load(id){
+ if(Object.prototype.hasOwnProperty.call(cache,id))return cache[id].exports;
+ const d=defs[id];if(!d)throw Error('O66_V3_MODULE_NOT_PINNED:'+id);
+ const m={exports:{}};cache[id]=m;
+ function req(x){if(!Object.prototype.hasOwnProperty.call(d[1],x))throw Error('O66_V3_UNDECLARED_DEPENDENCY:'+id+':'+x);return load(d[1][x]);}
+ d[0](req,m,m.exports);return m.exports;
+}
+root.__O66_DIRECT_BUNDLE_INFO={sourceCommit:"9494ba76af3d865ad1c7de4170f7f244e8bb86db",modules:Object.keys(defs).length,loadedAt:Date.now(),role:root.character?.name||null};
+void load('bootstrap/Order66DirectLaunch.js').launchOrder66Direct({root}).then(function(res){
+ root.__O66_DIRECT_LAST_RESULT=res;
+ try{console.log('O66_V3_DIRECT_RESULT',res?.ok,res?.role,res?.error||'',res?.status?.runtime||null)}catch(e){}
+}).catch(function(e){
+ root.__O66_DIRECT_LAST_RESULT={ok:false,error:String(e?.stack||e)};
+ try{console.error('O66_V3_DIRECT_THROW',e)}catch(_){}
+});
+})(globalThis);
