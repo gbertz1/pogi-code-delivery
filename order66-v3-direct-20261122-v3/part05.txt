@@ -1,0 +1,2004 @@
+      "item": "gemfragment",
+        "level": null
+      }
+    ],
+    "cost": 350000,
+    "quest": null
+  },
+  "moonshardearring": {
+    "output": "moonshardearring",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "intearring",
+        "level": 2
+      },
+      {
+        "quantity": 8,
+        "item": "voidthread",
+        "level": null
+      },
+      {
+        "quantity": 40,
+        "item": "bwing",
+        "level": null
+      },
+      {
+        "quantity": 4,
+        "item": "essenceofether",
+        "level": null
+      }
+    ],
+    "cost": 240000,
+    "quest": null
+  },
+  "cloverstud": {
+    "output": "cloverstud",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "vitearring",
+        "level": 2
+      },
+      {
+        "quantity": 1,
+        "item": "verdantcore",
+        "level": null
+      },
+      {
+        "quantity": 40,
+        "item": "ashleaf",
+        "level": null
+      },
+      {
+        "quantity": 40,
+        "item": "spores",
+        "level": null
+      },
+      {
+        "quantity": 5,
+        "item": "gslime",
+        "level": null
+      }
+    ],
+    "cost": 280000,
+    "quest": null
+  },
+  "anchorbelt": {
+    "output": "anchorbelt",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "hpbelt",
+        "level": 2
+      },
+      {
+        "quantity": 150,
+        "item": "reefglass",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "cshell",
+        "level": null
+      }
+    ],
+    "cost": 260000,
+    "quest": null
+  },
+  "windbelt": {
+    "output": "windbelt",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "dexbelt",
+        "level": 2
+      },
+      {
+        "quantity": 40,
+        "item": "stormfeather",
+        "level": null
+      },
+      {
+        "quantity": 4,
+        "item": "essenceofether",
+        "level": null
+      }
+    ],
+    "cost": 300000,
+    "quest": null
+  },
+  "knifebelt": {
+    "output": "knifebelt",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "dexbelt",
+        "level": 2
+      },
+      {
+        "quantity": 30,
+        "item": "spidersilk",
+        "level": null
+      },
+      {
+        "quantity": 8,
+        "item": "voidthread",
+        "level": null
+      },
+      {
+        "quantity": 20,
+        "item": "bwing",
+        "level": null
+      },
+      {
+        "quantity": 12,
+        "item": "poison",
+        "level": null
+      }
+    ],
+    "cost": 350000,
+    "quest": null
+  },
+  "gloampendant": {
+    "output": "gloampendant",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "dexamulet",
+        "level": 2
+      },
+      {
+        "quantity": 30,
+        "item": "voidthread",
+        "level": null
+      },
+      {
+        "quantity": 80,
+        "item": "bwing",
+        "level": null
+      },
+      {
+        "quantity": 6,
+        "item": "essenceofether",
+        "level": null
+      }
+    ],
+    "cost": 6400000,
+    "quest": null
+  },
+  "worldrootcrook": {
+    "output": "worldrootcrook",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "harbringer",
+        "level": 8
+      },
+      {
+        "quantity": 1,
+        "item": "sapstone",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "platinumingot",
+        "level": null
+      },
+      {
+        "quantity": 3,
+        "item": "goldingot",
+        "level": null
+      },
+      {
+        "quantity": 4,
+        "item": "ijx",
+        "level": null
+      },
+      {
+        "quantity": 12,
+        "item": "ectoplasm",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "bcandle",
+        "level": null
+      }
+    ],
+    "cost": 250000000,
+    "quest": null
+  },
+  "emberhood": {
+    "output": "emberhood",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "mmhat",
+        "level": 5
+      },
+      {
+        "quantity": 1,
+        "item": "embercore",
+        "level": null
+      },
+      {
+        "quantity": 8,
+        "item": "essenceoffire",
+        "level": null
+      },
+      {
+        "quantity": 20,
+        "item": "ashleaf",
+        "level": null
+      }
+    ],
+    "cost": 400000,
+    "quest": null
+  },
+  "bogcrown": {
+    "output": "bogcrown",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "helmet",
+        "level": 7
+      },
+      {
+        "quantity": 1,
+        "item": "verdantcore",
+        "level": null
+      },
+      {
+        "quantity": 12,
+        "item": "poison",
+        "level": null
+      },
+      {
+        "quantity": 40,
+        "item": "ashleaf",
+        "level": null
+      }
+    ],
+    "cost": 220000,
+    "quest": null
+  },
+  "ratworkcoat": {
+    "output": "ratworkcoat",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "coat",
+        "level": 5
+      },
+      {
+        "quantity": 30,
+        "item": "rattail",
+        "level": null
+      },
+      {
+        "quantity": 40,
+        "item": "ashleaf",
+        "level": null
+      }
+    ],
+    "cost": 75000,
+    "quest": null
+  },
+  "reefvest": {
+    "output": "reefvest",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "coat1",
+        "level": 7
+      },
+      {
+        "quantity": 200,
+        "item": "reefglass",
+        "level": null
+      },
+      {
+        "quantity": 2,
+        "item": "cshell",
+        "level": null
+      }
+    ],
+    "cost": 400000,
+    "quest": null
+  },
+  "oathplate": {
+    "output": "oathplate",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "coat1",
+        "level": null
+      },
+      {
+        "quantity": 4,
+        "item": "pleather",
+        "level": null
+      },
+      {
+        "quantity": 2,
+        "item": "ascale",
+        "level": null
+      },
+      {
+        "quantity": 20,
+        "item": "spores",
+        "level": null
+      }
+    ],
+    "cost": 180000,
+    "quest": null
+  },
+  "resolutesallet": {
+    "output": "resolutesallet",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "helmet1",
+        "level": 0
+      },
+      {
+        "quantity": 12,
+        "item": "dstones",
+        "level": null
+      },
+      {
+        "quantity": 4,
+        "item": "rfangs",
+        "level": null
+      }
+    ],
+    "cost": 240000,
+    "quest": null
+  },
+  "silkgrips": {
+    "output": "silkgrips",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "gloves",
+        "level": 5
+      },
+      {
+        "quantity": 30,
+        "item": "spidersilk",
+        "level": null
+      },
+      {
+        "quantity": 8,
+        "item": "voidthread",
+        "level": null
+      },
+      {
+        "quantity": 20,
+        "item": "bwing",
+        "level": null
+      }
+    ],
+    "cost": 120000,
+    "quest": null
+  },
+  "thundergrips": {
+    "output": "thundergrips",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "mrngloves",
+        "level": 6
+      },
+      {
+        "quantity": 80,
+        "item": "stormfeather",
+        "level": null
+      },
+      {
+        "quantity": 12,
+        "item": "essenceofether",
+        "level": null
+      }
+    ],
+    "cost": 800000,
+    "quest": null
+  },
+  "bogwalkers": {
+    "output": "bogwalkers",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "shoes1",
+        "level": 6
+      },
+      {
+        "quantity": 1,
+        "item": "verdantcore",
+        "level": null
+      },
+      {
+        "quantity": 12,
+        "item": "poison",
+        "level": null
+      },
+      {
+        "quantity": 8,
+        "item": "snakefang",
+        "level": null
+      }
+    ],
+    "cost": 260000,
+    "quest": null
+  },
+  "cinderboots": {
+    "output": "cinderboots",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "shoes1",
+        "level": 6
+      },
+      {
+        "quantity": 1,
+        "item": "embercore",
+        "level": null
+      },
+      {
+        "quantity": 8,
+        "item": "essenceoffire",
+        "level": null
+      },
+      {
+        "quantity": 20,
+        "item": "ashleaf",
+        "level": null
+      }
+    ],
+    "cost": 280000,
+    "quest": null
+  },
+  "rimeboots": {
+    "output": "rimeboots",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "shoes1",
+        "level": 6
+      },
+      {
+        "quantity": 1,
+        "item": "frostcore",
+        "level": null
+      },
+      {
+        "quantity": 8,
+        "item": "essenceoffrost",
+        "level": null
+      },
+      {
+        "quantity": 12,
+        "item": "bfur",
+        "level": null
+      }
+    ],
+    "cost": 280000,
+    "quest": null
+  },
+  "reedpants": {
+    "output": "reedpants",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "pants",
+        "level": 6
+      },
+      {
+        "quantity": 20,
+        "item": "frogt",
+        "level": null
+      },
+      {
+        "quantity": 4,
+        "item": "lotusf",
+        "level": null
+      },
+      {
+        "quantity": 40,
+        "item": "ashleaf",
+        "level": null
+      }
+    ],
+    "cost": 100000,
+    "quest": null
+  },
+  "beastmantle": {
+    "output": "beastmantle",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "cape",
+        "level": 7
+      },
+      {
+        "quantity": 2,
+        "item": "verdantcore",
+        "level": null
+      },
+      {
+        "quantity": 240,
+        "item": "leather",
+        "level": null
+      }
+    ],
+    "cost": 1200000,
+    "quest": null
+  },
+  "starcloak": {
+    "output": "starcloak",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "cape",
+        "level": 7
+      },
+      {
+        "quantity": 40,
+        "item": "voidthread",
+        "level": null
+      },
+      {
+        "quantity": 40,
+        "item": "essenceofether",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "platinumnugget",
+        "level": null
+      }
+    ],
+    "cost": 1800000,
+    "quest": null
+  },
+  "cave_locktooth": {
+    "output": "cave_locktooth",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 6,
+        "item": "cave_amber",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "blade",
+        "level": 0
+      },
+      {
+        "quantity": 2,
+        "item": "reefglass",
+        "level": null
+      }
+    ],
+    "cost": 8000,
+    "quest": null
+  },
+  "cave_counterweight": {
+    "output": "cave_counterweight",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 8,
+        "item": "cave_amber",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "wshield",
+        "level": 0
+      },
+      {
+        "quantity": 1,
+        "item": "dstones",
+        "level": null
+      }
+    ],
+    "cost": 12000,
+    "quest": null
+  },
+  "cave_mothsteps": {
+    "output": "cave_mothsteps",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 6,
+        "item": "cave_amber",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "shoes",
+        "level": 0
+      },
+      {
+        "quantity": 2,
+        "item": "beewings",
+        "level": null
+      }
+    ],
+    "cost": 12000,
+    "quest": null
+  },
+  "cave_loaded_die": {
+    "output": "cave_loaded_die",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 10,
+        "item": "cave_amber",
+        "level": null
+      },
+      {
+        "quantity": 8,
+        "item": "seashell",
+        "level": null
+      },
+      {
+        "quantity": 2,
+        "item": "reefglass",
+        "level": null
+      }
+    ],
+    "cost": 16000,
+    "quest": null
+  },
+  "cave_tunnelaxe": {
+    "output": "cave_tunnelaxe",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 8,
+        "item": "cave_amber",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "blade",
+        "level": 0
+      },
+      {
+        "quantity": 1,
+        "item": "wbasher",
+        "level": 0
+      }
+    ],
+    "cost": 12000,
+    "quest": null
+  },
+  "cave_reedscythe": {
+    "output": "cave_reedscythe",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 1,
+        "item": "wbasher",
+        "level": 0
+      },
+      {
+        "quantity": 1,
+        "item": "blade",
+        "level": 0
+      },
+      {
+        "quantity": 1,
+        "item": "spidersilk",
+        "level": null
+      }
+    ],
+    "cost": 500,
+    "quest": null
+  },
+  "cave_deepaxe": {
+    "output": "cave_deepaxe",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 400,
+        "item": "cave_amber",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "cave_tunnelaxe",
+        "level": 0
+      },
+      {
+        "quantity": 10,
+        "item": "gemfragment",
+        "level": null
+      },
+      {
+        "quantity": 20,
+        "item": "leather",
+        "level": null
+      }
+    ],
+    "cost": 480000,
+    "quest": null
+  },
+  "cave_ambercoat": {
+    "output": "cave_ambercoat",
+    "outputData": null,
+    "items": [
+      {
+        "quantity": 300,
+        "item": "cave_amber",
+        "level": null
+      },
+      {
+        "quantity": 1,
+        "item": "coat",
+        "level": 0
+      },
+      {
+        "quantity": 30,
+        "item": "spidersilk",
+        "level": null
+      },
+      {
+        "quantity": 20,
+        "item": "cscale",
+        "level": null
+      }
+    ],
+    "cost": 360000,
+    "quest": null
+  }
+};
+
+function clone(v){return v==null?v:JSON.parse(JSON.stringify(v));}
+
+const REVERSE=(()=>{
+  const out={};
+  for(const [recipeId,row] of Object.entries(RECIPES)){
+    for(const ingredient of row.items){
+      const id=String(ingredient.item||'');
+      if(!id)continue;
+      if(!out[id])out[id]=[];
+      out[id].push(Object.freeze({
+        recipeId,
+        output:row.output,
+        quantity:Number(ingredient.quantity||0),
+        level:ingredient.level==null?null:Number(ingredient.level),
+        cost:Number(row.cost||0),
+        quest:row.quest||null
+      }));
+    }
+  }
+  for(const id of Object.keys(out))Object.freeze(out[id]);
+  return Object.freeze(out);
+})();
+
+function recipe(recipeId){
+  const row=RECIPES[String(recipeId||'')];
+  return row?clone(row):null;
+}
+
+function recipesUsing(itemId){
+  const rows=REVERSE[String(itemId||'')]||[];
+  return rows.map(clone);
+}
+
+function isIngredient(itemId){
+  return recipesUsing(itemId).length>0;
+}
+
+function requiresSpecificLevel(itemId){
+  return recipesUsing(itemId).some(row=>row.level!=null);
+}
+
+function outputsUsing(itemId){
+  return [...new Set(recipesUsing(itemId).map(row=>row.output))];
+}
+
+function ingredientIds(){
+  return Object.keys(REVERSE).sort();
+}
+
+function recipeIds(){
+  return Object.keys(RECIPES).sort();
+}
+
+function requirementSummary(itemId){
+  const uses=recipesUsing(itemId);
+  return{
+    item:String(itemId||''),
+    isIngredient:uses.length>0,
+    recipes:uses,
+    outputs:[...new Set(uses.map(x=>x.output))],
+    exactLevels:[...new Set(uses.filter(x=>x.level!=null).map(x=>x.level))].sort((a,b)=>a-b)
+  };
+}
+
+function countMatching(items,itemId,level){
+  let total=0;
+  for(const item of Array.isArray(items)?items:[]){
+    if(!item||String(item.name||'')!==String(itemId||''))continue;
+    if(level!=null&&Number(item.level||0)!==Number(level))continue;
+    total+=Number(item.q||1);
+  }
+  return total;
+}
+
+function craftPlan(recipeId,{inventory=[],bank=[]}={}){
+  const row=recipe(recipeId);
+  if(!row)return{ok:false,error:'RECIPE_UNKNOWN',recipeId:String(recipeId||'')};
+  const requirements=row.items.map(req=>{
+    const inventoryQty=countMatching(inventory,req.item,req.level);
+    const bankQty=countMatching(bank,req.item,req.level);
+    const available=inventoryQty+bankQty;
+    const required=Number(req.quantity||0);
+    return{
+      item:req.item,
+      level:req.level,
+      required,
+      inventory:inventoryQty,
+      bank:bankQty,
+      available,
+      missing:Math.max(0,required-available),
+      ready:available>=required
+    };
+  });
+  return{
+    ok:true,
+    recipeId:String(recipeId),
+    output:row.output,
+    outputData:row.outputData,
+    cost:row.cost,
+    quest:row.quest,
+    ready:requirements.every(x=>x.ready),
+    requirements
+  };
+}
+
+function stats(){
+  const leveled=Object.keys(REVERSE).filter(id=>requiresSpecificLevel(id));
+  return{
+    recipes:Object.keys(RECIPES).length,
+    uniqueIngredients:Object.keys(REVERSE).length,
+    leveledIngredientIds:leveled.length
+  };
+}
+
+module.exports={
+  SOURCE,RECIPES,recipe,recipesUsing,isIngredient,requiresSpecificLevel,
+  outputsUsing,ingredientIds,recipeIds,requirementSummary,countMatching,craftPlan,stats
+};
+
+},{}],
+"ligaments/gear/GearHandoffPlanner.js":[function(require,module,exports){
+'use strict';
+
+const {normalizeSnapshot}=require('../../organs/bank/BankOrganizer');
+const {identity}=require('../inventory/InventoryService');
+const policy=require('./GearHandoffPolicy');
+
+const clone=v=>v==null?v:JSON.parse(JSON.stringify(v));
+
+function sourceFrom(entry){
+  return{
+    pack:String(entry.pack),
+    slot:Number(entry.slot),
+    item:clone(entry.item),
+    identity:identity(entry.item)
+  };
+}
+
+function workId(operation,item,target,sources){
+  const locs=(sources||[]).map(x=>x.pack+':'+x.slot+':'+x.identity).join(',');
+  return['V3_GEAR_HANDOFF',operation,String(item||''),'T'+Number(target),locs].join('|');
+}
+
+function createGearHandoffPlanner({isProtected=null}={}){
+  function plan(bankSnapshot){
+    const entries=normalizeSnapshot(bankSnapshot);
+    const work=[];
+    const held=[];
+    const waiting=[];
+    const complete=[];
+    const ignored=[];
+    const compoundGroups=new Map();
+
+    for(const entry of entries){
+      const item=entry.item||{};
+      const decision=policy.decision(item,{isProtected});
+      const hasRule=!!decision.rule;
+
+      if(!hasRule){
+        if(decision.action==='KEEP')held.push({...sourceFrom(entry),reason:decision.reason});
+        else ignored.push({...sourceFrom(entry),reason:decision.reason});
+        continue;
+      }
+
+      if(Number(item.q||1)!==1){
+        held.push({...sourceFrom(entry),reason:'STACKED_PRODUCTION_ITEM_UNSAFE',rule:clone(decision.rule)});
+        continue;
+      }
+
+      if(decision.action==='KEEP'||decision.action==='HOLD'){
+        held.push({...sourceFrom(entry),reason:decision.reason,rule:clone(decision.rule)});
+        continue;
+      }
+
+      if(decision.action==='BANK'){
+        complete.push({...sourceFrom(entry),reason:'TARGET_REACHED',target:Number(decision.target),rule:clone(decision.rule)});
+        continue;
+      }
+
+      const source=sourceFrom(entry);
+      const operation=String(decision.action||'').toUpperCase();
+      const target=Number(decision.target);
+
+      if(operation==='UPGRADE'){
+        const sources=[source];
+        work.push({
+          id:workId(operation,item.name,target,sources),
+          operation,item:String(item.name),level:Number(item.level||0),target,
+          sources,rule:clone(decision.rule)
+        });
+        continue;
+      }
+
+      if(operation==='COMPOUND'){
+        const key=[String(item.name),Number(item.level||0),String(item.p||''),String(item.stat_type||''),target].join('|');
+        if(!compoundGroups.has(key))compoundGroups.set(key,{item:String(item.name),level:Number(item.level||0),target,rule:clone(decision.rule),sources:[]});
+        compoundGroups.get(key).sources.push(source);
+        continue;
+      }
+
+      held.push({...source,reason:'HANDOFF_OPERATION_UNSUPPORTED',rule:clone(decision.rule)});
+    }
+
+    for(const group of compoundGroups.values()){
+      group.sources.sort((a,b)=>a.pack.localeCompare(b.pack)||a.slot-b.slot);
+      let index=0;
+      while(group.sources.length-index>=3){
+        const sources=group.sources.slice(index,index+3);
+        work.push({
+          id:workId('COMPOUND',group.item,group.target,sources),
+          operation:'COMPOUND',item:group.item,level:group.level,target:group.target,
+          sources,rule:clone(group.rule)
+        });
+        index+=3;
+      }
+      const remaining=group.sources.slice(index);
+      if(remaining.length){
+        waiting.push({
+          operation:'COMPOUND',item:group.item,level:group.level,target:group.target,
+          have:remaining.length,need:3-remaining.length,sources:remaining,reason:'NEED_THREE_EXACT_MATCHES'
+        });
+      }
+    }
+
+    work.sort((a,b)=>
+      a.operation.localeCompare(b.operation)||
+      a.item.localeCompare(b.item)||
+      a.level-b.level||
+      a.sources[0].pack.localeCompare(b.sources[0].pack)||
+      a.sources[0].slot-b.sources[0].slot
+    );
+
+    return{
+      ok:true,
+      work:clone(work),
+      next:work.length?clone(work[0]):null,
+      held:clone(held),
+      waiting:clone(waiting),
+      complete:clone(complete),
+      ignored:clone(ignored),
+      summary:{
+        bankItems:entries.length,
+        workUnits:work.length,
+        held:held.length,
+        waitingGroups:waiting.length,
+        alreadyAtTarget:complete.length,
+        ignored:ignored.length
+      }
+    };
+  }
+
+  return{plan};
+}
+
+module.exports={sourceFrom,workId,createGearHandoffPlanner};
+
+},{"../../organs/bank/BankOrganizer":"organs/bank/BankOrganizer.js","../inventory/InventoryService":"ligaments/inventory/InventoryService.js","./GearHandoffPolicy":"ligaments/gear/GearHandoffPolicy.js"}],
+"ligaments/gear/GearHandoffPolicy.js":[function(require,module,exports){
+'use strict';
+
+const registry=require('../../organs/gear/GearRegistry');
+const exchangePolicy=require('../../organs/exchange/ExchangePolicy');
+
+const clone=v=>v==null?v:JSON.parse(JSON.stringify(v));
+
+function explicitRewardRule(itemId){
+  const row=exchangePolicy.policyFor(String(itemId||''));
+  if(!row||!['UPGRADE','COMPOUND'].includes(String(row.action||'').toUpperCase()))return null;
+  const operation=String(row.action).toUpperCase();
+  const target=Number(row.target);
+  if(!Number.isInteger(target)||target<0)return null;
+  const base=registry.PRODUCTION[String(itemId||'')];
+  const compatibleBase=base&&String(base.operation||'').toUpperCase()===operation?base:null;
+  return{
+    operation,
+    target,
+    scroll:String(compatibleBase&&compatibleBase.scroll||'AUTO'),
+    offering:String(compatibleBase&&compatibleBase.offering||'NONE'),
+    after:'BANK',
+    destination:'AUTO_POLICY',
+    source:'USER_EXCHANGE_POLICY'
+  };
+}
+
+function registryRule(itemId){
+  const base=registry.PRODUCTION[String(itemId||'')];
+  if(!base||base.enabled===false)return null;
+  return{
+    operation:String(base.operation||'').toUpperCase(),
+    target:Number(base.target),
+    scroll:String(base.scroll||'AUTO'),
+    offering:String(base.offering||'NONE'),
+    after:String(base.after||'BANK').toUpperCase(),
+    destination:String(base.destination||'AUTO_POLICY').toUpperCase(),
+    source:'GEAR_REGISTRY'
+  };
+}
+
+function ruleFor(itemId){
+  return clone(explicitRewardRule(itemId)||registryRule(itemId));
+}
+
+function protectedReason(item,{isProtected=null}={}){
+  if(!item||!item.name)return'ITEM_INVALID';
+  if(item.p==='shiny')return'SHINY_PROTECTED';
+  if(item.l===true||item.locked===true)return'ITEM_LOCKED';
+  if(typeof isProtected==='function'){
+    try{if(isProtected(item)===true)return'EXTERNAL_PROTECTION';}
+    catch{return'PROTECTION_CHECK_FAILED';}
+  }
+  return null;
+}
+
+function decision(item,options={}){
+  const protection=protectedReason(item,options);
+  if(protection)return{action:'KEEP',reason:protection,rule:null};
+  const rule=ruleFor(item&&item.name);
+  if(!rule)return{action:'HOLD',reason:'NO_GEAR_HANDOFF_RULE',rule:null};
+  const level=Number(item&&item.level||0);
+  if(level>=rule.target){
+    return{action:'BANK',reason:'TARGET_REACHED',target:rule.target,rule};
+  }
+  return{action:rule.operation,reason:'GEAR_HANDOFF_REQUIRED',target:rule.target,rule};
+}
+
+module.exports={explicitRewardRule,registryRule,ruleFor,protectedReason,decision};
+
+},{"../../organs/gear/GearRegistry":"organs/gear/GearRegistry.js","../../organs/exchange/ExchangePolicy":"organs/exchange/ExchangePolicy.js"}],
+"ligaments/gear/GearHandoffService.js":[function(require,module,exports){
+'use strict';
+
+const GearControlPlane=require('../../organs/gear/GearControlPlane');
+
+const OWNER_STAGE='GEAR_PRODUCTION';
+const OWNER_RETURN='GEAR_HANDOFF_RETURN';
+const VERSION=1;
+const clone=v=>v==null?v:JSON.parse(JSON.stringify(v));
+
+function sourceKey(source){return String(source.pack)+':'+Number(source.slot)+':'+String(source.identity||'');}
+
+function createSession(work,now){
+  return{
+    version:VERSION,
+    state:'GEAR_HANDOFF',
+    id:String(work.id),
+    phase:'STAGING',
+    work:clone(work),
+    staged:[],
+    outputs:[],
+    deposits:[],
+    job:null,
+    lastError:null,
+    createdAt:Number(now()),
+    updatedAt:Number(now())
+  };
+}
+
+function validateSession(session){
+  if(!session||typeof session!=='object')throw new Error('GEAR_HANDOFF_SESSION_REQUIRED');
+  if(session.version!==VERSION)throw new Error('GEAR_HANDOFF_SESSION_VERSION_INVALID');
+  if(session.state!=='GEAR_HANDOFF')throw new Error('GEAR_HANDOFF_SESSION_STATE_INVALID');
+  if(!session.id||!session.work||!Array.isArray(session.work.sources))throw new Error('GEAR_HANDOFF_SESSION_WORK_INVALID');
+  if(!['STAGING','READY_FOR_GEAR','NEEDS_RESCAN','READY_FOR_BANK','COMPLETE','CANCELLED'].includes(session.phase)){
+    throw new Error('GEAR_HANDOFF_PHASE_INVALID');
+  }
+  if(!Array.isArray(session.staged)||!Array.isArray(session.outputs)||!Array.isArray(session.deposits)){
+    throw new Error('GEAR_HANDOFF_SESSION_LIST_INVALID');
+  }
+  return true;
+}
+
+function createGearHandoffService({
+  inventory,
+  retrieveOps,
+  storeOps,
+  planner,
+  controlPlane=GearControlPlane,
+  executorReady=false,
+  now=Date.now
+}={}){
+  if(
+    !inventory||
+    typeof inventory.reserve!=='function'||
+    typeof inventory.release!=='function'||
+    typeof inventory.transferReservation!=='function'||
+    typeof inventory.slot!=='function'||
+    typeof inventory.identity!=='function'
+  ){
+    throw new Error('GEAR_HANDOFF_INVENTORY_REQUIRED');
+  }
+  if(!retrieveOps||typeof retrieveOps.retrieveExact!=='function')throw new Error('GEAR_HANDOFF_RETRIEVE_OPS_REQUIRED');
+  if(!storeOps||typeof storeOps.storeExact!=='function')throw new Error('GEAR_HANDOFF_STORE_OPS_REQUIRED');
+  if(!planner||typeof planner.plan!=='function')throw new Error('GEAR_HANDOFF_PLANNER_REQUIRED');
+  if(!controlPlane||typeof controlPlane.buildJob!=='function')throw new Error('GEAR_HANDOFF_CONTROL_PLANE_REQUIRED');
+
+  const canExecuteGear=typeof executorReady==='function'?executorReady:()=>executorReady===true;
+  let active=null;
+  const touch=()=>{if(active)active.updatedAt=Number(now());};
+  const status=()=>active?clone(active):null;
+
+  function ensureActive(workId=null){
+    if(!active)return{ok:false,error:'GEAR_HANDOFF_NO_ACTIVE_SESSION'};
+    if(workId!=null&&String(workId)!==String(active.id))return{ok:false,error:'GEAR_HANDOFF_SESSION_MISMATCH',active:active.id,requested:String(workId)};
+    return{ok:true};
+  }
+
+  async function stageActive(){
+    const checked=ensureActive();
+    if(!checked.ok)return checked;
+    if(active.phase==='READY_FOR_GEAR')return{ok:true,ready:true,job:clone(active.job),session:status()};
+    if(active.phase!=='STAGING')return{ok:false,error:'GEAR_HANDOFF_NOT_STAGING',phase:active.phase,session:status()};
+
+    const already=new Set(active.staged.map(x=>x.sourceKey));
+    for(const source of active.work.sources){
+      const key=sourceKey(source);
+      if(already.has(key))continue;
+
+      const proof=await retrieveOps.retrieveExact({
+        pack:source.pack,
+        slot:source.slot,
+        expectedIdentity:source.identity
+      });
+      if(!proof||proof.ok!==true||proof.verified!==true){
+        active.lastError={step:'RETRIEVE',sourceKey:key,error:proof&&proof.error||'BANK_RETRIEVE_UNPROVEN',proof:clone(proof)};
+        touch();
+        return{ok:false,error:'GEAR_HANDOFF_RETRIEVE_FAILED',detail:clone(active.lastError),session:status()};
+      }
+      if(String(proof.identity)!==String(source.identity)){
+        active.lastError={step:'RETRIEVE_VERIFY',sourceKey:key,error:'GEAR_HANDOFF_RETRIEVED_IDENTITY_MISMATCH',expected:source.identity,actual:proof.identity};
+        touch();
+        return{ok:false,error:'GEAR_HANDOFF_RETRIEVED_IDENTITY_MISMATCH',detail:clone(active.lastError),session:status()};
+      }
+
+      const reserved=await inventory.reserve(proof.inventorySlot,OWNER_STAGE,{expected:source.identity});
+      if(!reserved||reserved.ok!==true){
+        active.lastError={step:'RESERVE',sourceKey:key,error:reserved&&reserved.error||'GEAR_HANDOFF_RESERVE_FAILED',inventorySlot:proof.inventorySlot};
+        touch();
+        return{ok:false,error:'GEAR_HANDOFF_RESERVE_FAILED',detail:clone(active.lastError),session:status()};
+      }
+
+      active.staged.push({
+        sourceKey:key,
+        source:clone(source),
+        inventorySlot:Number(proof.inventorySlot),
+        identity:String(source.identity),
+        reservation:clone(reserved.reservation)
+      });
+      already.add(key);
+      touch();
+    }
+
+    const built=controlPlane.buildJob({
+      operation:active.work.operation,
+      item:active.work.item,
+      target:active.work.target,
+      variant:'NORMAL',
+      after:'BANK',
+      destination:'AUTO_POLICY',
+      scope:'BANK_HANDOFF',
+      mode:active.work.operation==='COMPOUND'?'EXACT_THREE':'EXACT_ONE'
+    });
+    if(!built||built.ok!==true){
+      active.lastError={step:'BUILD_JOB',error:built&&built.error||'GEAR_HANDOFF_JOB_REJECTED',detail:clone(built)};
+      touch();
+      return{ok:false,error:'GEAR_HANDOFF_JOB_REJECTED',detail:clone(active.lastError),session:status()};
+    }
+
+    active.job={
+      ...clone(built.job),
+      handoffId:active.id,
+      stagedSlots:active.staged.map(x=>x.inventorySlot),
+      stagedIdentities:active.staged.map(x=>x.identity),
+      expectedInputCount:active.work.operation==='COMPOUND'?3:1
+    };
+    active.phase='READY_FOR_GEAR';
+    active.lastError=null;
+    touch();
+    return{ok:true,ready:true,job:clone(active.job),session:status()};
+  }
+
+  async function stageNext(bankSnapshot){
+    if(active&&active.phase!=='COMPLETE'&&active.phase!=='CANCELLED')return stageActive();
+    const plan=planner.plan(bankSnapshot);
+    if(!plan||plan.ok!==true)return{ok:false,error:'GEAR_HANDOFF_PLAN_FAILED',plan:clone(plan)};
+    if(!plan.next){
+      active=null;
+      return{ok:true,no_work:true,plan:clone(plan),session:null};
+    }
+    active=createSession(plan.next,now);
+    return stageActive();
+  }
+
+  async function stageNextFromBank(){
+    if(typeof retrieveOps.snapshot!=='function')return{ok:false,error:'GEAR_HANDOFF_BANK_SNAPSHOT_UNAVAILABLE'};
+    let snapshot;
+    try{snapshot=await retrieveOps.snapshot();}
+    catch(error){return{ok:false,error:'GEAR_HANDOFF_BANK_SNAPSHOT_FAILED',detail:String(error&&error.message||error)};}
+    return stageNext(snapshot);
+  }
+
+  function executionReady(){return canExecuteGear()===true;}
+
+  function routingHint(){
+    if(!active)return{state:null,reason:'NO_ACTIVE_HANDOFF'};
+    if(active.phase==='STAGING'||active.phase==='READY_FOR_BANK'||active.phase==='NEEDS_RESCAN'){
+      return{state:'BANK',reason:'GEAR_HANDOFF_'+active.phase,workId:active.id};
+    }
+    if(active.phase==='READY_FOR_GEAR'){
+      if(canExecuteGear()===true)return{state:'GEAR_PRODUCTION',reason:'GEAR_HANDOFF_READY_FOR_GEAR',workId:active.id};
+      return{state:null,reason:'GEAR_EXECUTOR_REQUIRED',workId:active.id};
+    }
+    return{state:null,reason:'GEAR_HANDOFF_'+active.phase,workId:active.id};
+  }
+
+  async function acceptGearResult({workId,success,outputs=[],reason=null}={}){
+    const checked=ensureActive(workId);
+    if(!checked.ok)return checked;
+    if(active.phase!=='READY_FOR_GEAR')return{ok:false,error:'GEAR_HANDOFF_NOT_READY_FOR_GEAR',phase:active.phase};
+
+    if(success!==true){
+      active.phase='NEEDS_RESCAN';
+      active.lastError={step:'GEAR',error:'GEAR_ATTEMPT_NOT_SUCCESSFUL',reason:reason==null?null:String(reason)};
+      touch();
+      return{ok:true,needsRescan:true,session:status()};
+    }
+
+    const rows=Array.isArray(outputs)?outputs:[];
+    if(!rows.length){
+      active.lastError={step:'GEAR_VERIFY',error:'GEAR_SUCCESS_OUTPUT_REQUIRED'};
+      touch();
+      return{ok:false,error:'GEAR_SUCCESS_OUTPUT_REQUIRED',session:status()};
+    }
+
+    const verified=[];
+    for(const row of rows){
+      const slot=Number(row&&row.inventorySlot);
+      if(!Number.isInteger(slot)||slot<0)return{ok:false,error:'GEAR_OUTPUT_SLOT_INVALID'};
+      const current=await inventory.slot(slot);
+      if(!current)return{ok:false,error:'GEAR_OUTPUT_NOT_FOUND',inventorySlot:slot};
+      const actual=inventory.identity(current);
+      const claimed=row.identity||inventory.identity(row.item);
+      if(claimed&&String(claimed)!==String(actual)){
+        return{ok:false,error:'GEAR_OUTPUT_IDENTITY_MISMATCH',inventorySlot:slot,claimed:String(claimed),actual:String(actual)};
+      }
+      verified.push({inventorySlot:slot,item:clone(current),identity:String(actual)});
+    }
+
+    const stagedBySlot=new Map(active.staged.map(row=>[Number(row.inventorySlot),row]));
+    for(const row of verified){
+      if(!stagedBySlot.has(Number(row.inventorySlot))){
+        active.lastError={step:'GEAR_VERIFY',error:'GEAR_OUTPUT_SLOT_NOT_STAGED',inventorySlot:row.inventorySlot};
+        touch();
+        return{ok:false,error:'GEAR_OUTPUT_SLOT_NOT_STAGED',session:status()};
+      }
+    }
+
+    const reservedOutputs=[];
+    const outputSlots=new Set();
+    for(const row of verified){
+      const transferred=await inventory.transferReservation(
+        row.inventorySlot,
+        OWNER_STAGE,
+        OWNER_RETURN,
+        {expected:row.identity}
+      );
+      if(!transferred||transferred.ok!==true){
+        active.phase='NEEDS_RESCAN';
+        active.lastError={step:'RETURN_RESERVE_TRANSFER',error:transferred&&transferred.error||'GEAR_OUTPUT_RESERVATION_TRANSFER_FAILED',inventorySlot:row.inventorySlot};
+        touch();
+        return{ok:false,error:'GEAR_OUTPUT_RESERVATION_TRANSFER_FAILED',session:status()};
+      }
+      outputSlots.add(Number(row.inventorySlot));
+      reservedOutputs.push({...row,reservation:clone(transferred.reservation)});
+    }
+
+    for(const row of active.staged){
+      if(outputSlots.has(Number(row.inventorySlot)))continue;
+      inventory.release(row.inventorySlot,OWNER_STAGE);
+    }
+
+    active.outputs=reservedOutputs;
+    active.phase='READY_FOR_BANK';
+    active.lastError=null;
+    touch();
+    return{ok:true,readyForBank:true,session:status()};
+  }
+
+  async function reconcileAfterGearFailure(workId){
+    const checked=ensureActive(workId);
+    if(!checked.ok)return checked;
+    if(active.phase!=='NEEDS_RESCAN')return{ok:false,error:'GEAR_HANDOFF_RESCAN_NOT_REQUIRED',phase:active.phase,session:status()};
+
+    const survivors=[];
+    for(const row of active.staged){
+      const current=await inventory.slot(row.inventorySlot);
+      if(!current){
+        inventory.release(row.inventorySlot,OWNER_STAGE);
+        continue;
+      }
+      if(String(current.name||'')!==String(active.work.item||'')){
+        active.lastError={
+          step:'GEAR_FAILURE_RESCAN',
+          error:'GEAR_FAILURE_SLOT_UNEXPECTED_ITEM',
+          inventorySlot:row.inventorySlot,
+          expectedItem:String(active.work.item||''),
+          actualItem:String(current.name||'')
+        };
+        touch();
+        return{ok:false,error:'GEAR_FAILURE_SLOT_UNEXPECTED_ITEM',detail:clone(active.lastError),session:status()};
+      }
+      const currentIdentity=inventory.identity(current);
+      const transferred=await inventory.transferReservation(
+        row.inventorySlot,
+        OWNER_STAGE,
+        OWNER_RETURN,
+        {expected:currentIdentity}
+      );
+      if(!transferred||transferred.ok!==true){
+        active.lastError={
+          step:'GEAR_FAILURE_RESCAN',
+          error:transferred&&transferred.error||'GEAR_FAILURE_SURVIVOR_RESERVATION_TRANSFER_FAILED',
+          inventorySlot:row.inventorySlot
+        };
+        touch();
+        return{ok:false,error:'GEAR_FAILURE_SURVIVOR_RESERVATION_TRANSFER_FAILED',detail:clone(active.lastError),session:status()};
+      }
+      survivors.push({
+        inventorySlot:Number(row.inventorySlot),
+        item:clone(current),
+        identity:String(currentIdentity),
+        reservation:clone(transferred.reservation)
+      });
+    }
+
+    active.outputs=survivors;
+    active.lastError=null;
+    active.phase=survivors.length?'READY_FOR_BANK':'COMPLETE';
+    touch();
+    return{
+      ok:true,
+      reconciled:true,
+      survivors:survivors.length,
+      complete:active.phase==='COMPLETE',
+      readyForBank:active.phase==='READY_FOR_BANK',
+      session:status()
+    };
+  }
+
+  async function returnToBank(workId){
+    const checked=ensureActive(workId);
+    if(!checked.ok)return checked;
+    if(active.phase==='COMPLETE')return{ok:true,complete:true,session:status()};
+    if(active.phase!=='READY_FOR_BANK')return{ok:false,error:'GEAR_HANDOFF_NOT_READY_FOR_BANK',phase:active.phase,session:status()};
+
+    const depositedSlots=new Set(active.deposits.map(x=>Number(x.inventorySlot)));
+    for(const output of active.outputs){
+      if(depositedSlots.has(Number(output.inventorySlot)))continue;
+      const proof=await storeOps.storeExact({
+        inventorySlot:output.inventorySlot,
+        expectedIdentity:output.identity,
+        item:output.item
+      });
+      if(!proof||proof.ok!==true||proof.verified!==true){
+        active.lastError={step:'BANK_RETURN',inventorySlot:output.inventorySlot,error:proof&&proof.error||'BANK_RETURN_UNPROVEN',proof:clone(proof)};
+        touch();
+        return{ok:false,error:'GEAR_HANDOFF_BANK_RETURN_FAILED',detail:clone(active.lastError),session:status()};
+      }
+      inventory.release(output.inventorySlot,OWNER_RETURN);
+      active.deposits.push(clone(proof));
+      depositedSlots.add(Number(output.inventorySlot));
+      touch();
+    }
+
+    active.phase='COMPLETE';
+    active.lastError=null;
+    touch();
+    return{ok:true,complete:true,session:status()};
+  }
+
+  function inspect(bankSnapshot){return planner.plan(bankSnapshot);}
+
+  function restore(saved){
+    const candidate=clone(saved);
+    validateSession(candidate);
+    active=candidate;
+    return{ok:true,session:status()};
+  }
+
+  function cancel({workId,releaseReservations=false}={}){
+    const checked=ensureActive(workId);
+    if(!checked.ok)return checked;
+    if(releaseReservations===true){
+      for(const row of active.staged)inventory.release(row.inventorySlot,OWNER_STAGE);
+      for(const row of active.outputs)inventory.release(row.inventorySlot,OWNER_RETURN);
+    }
+    active.phase='CANCELLED';
+    active.lastError={step:'CANCEL',error:'MANUAL_CANCEL'};
+    touch();
+    return{ok:true,cancelled:true,session:status()};
+  }
+
+  async function health(){
+    return{
+      ok:true,
+      active:!!active,
+      phase:active&&active.phase||null,
+      workId:active&&active.id||null,
+      staged:active?active.staged.length:0,
+      outputs:active?active.outputs.length:0,
+      deposits:active?active.deposits.length:0,
+      executor_ready:canExecuteGear()===true
+    };
+  }
+
+  return{inspect,stageNext,stageNextFromBank,stageActive,executionReady,routingHint,acceptGearResult,reconcileAfterGearFailure,returnToBank,status,restore,cancel,health,validateSession};
+}
+
+module.exports={OWNER_STAGE,OWNER_RETURN,VERSION,sourceKey,createSession,validateSession,createGearHandoffService};
+
+},{"../../organs/gear/GearControlPlane":"organs/gear/GearControlPlane.js"}],
+"ligaments/gear/GearService.js":[function(require,module,exports){
+'use strict';
+
+function clone(v){return v==null?v:JSON.parse(JSON.stringify(v));}
+function gearIdentity(item){
+  if(!item)return null;
+  return [String(item.name||''),Number(item.level||0),item.p==null?'':String(item.p)].join('|');
+}
+function matches(item,request={}){
+  if(!item||String(item.name||'')!==String(request.name||''))return false;
+  if(request.level!=null&&Number(item.level||0)!==Number(request.level))return false;
+  if(request.minLevel!=null&&Number(item.level||0)<Number(request.minLevel))return false;
+  if(request.p!=null&&String(item.p||'')!==String(request.p))return false;
+  return true;
+}
+const defaultSleep=ms=>new Promise(resolve=>setTimeout(resolve,Math.max(0,Number(ms)||0)));
+
+function createGearService({
+  adapter,
+  protectedItems=[],
+  sleep=defaultSleep,
+  settleMs=60,
+  verifyIntervalMs=80,
+  verifyAttempts=10
+}={}){
+  if(!adapter||typeof adapter.inventory!=='function'||typeof adapter.equipment!=='function')throw new Error('GEAR_ADAPTER_REQUIRED');
+  const protectedSet=new Set((protectedItems||[]).map(String));
+  let tail=Promise.resolve();
+
+  function serialized(task){
+    const run=tail.then(task,task);
+    tail=run.catch(()=>{});
+    return run;
+  }
+
+  async function locate(request={}){
+    const items=await adapter.inventory();
+    const rows=[];
+    for(let slot=0;slot<items.length;slot++){
+      const item=items[slot];
+      if(matches(item,request))rows.push({slot,item:clone(item),identity:gearIdentity(item)});
+    }
+    if(!rows.length)return{ok:false,error:'GEAR_NOT_FOUND'};
+    if(String(request.selection||'').toUpperCase()==='HIGHEST_LEVEL'){
+      rows.sort((a,b)=>Number(b.item.level||0)-Number(a.item.level||0)||a.slot-b.slot);
+    }
+    return{ok:true,...rows[0]};
+  }
+
+  async function locateExact({name,level=0,p=null}={}){
+    return locate({name,level,p});
+  }
+
+  function equippedMatch(equipment,request={}){
+    if(request.slot){
+      const item=equipment&&equipment[String(request.slot)];
+      return matches(item,request)?{slot:String(request.slot),item:clone(item),identity:gearIdentity(item)}:null;
+    }
+    for(const [slot,item] of Object.entries(equipment||{})){
+      if(matches(item,request))return{slot,item:clone(item),identity:gearIdentity(item)};
+    }
+    return null;
+  }
+
+  async function waitForEquipment(request,expectedIdentity=null){
+    const attempts=Math.max(1,Number(verifyAttempts)||1);
+    for(let attempt=1;attempt<=attempts;attempt++){
+      const equipment=await adapter.equipment();
+      const found=equippedMatch(equipment,request);
+      if(found&&(!expectedIdentity||found.identity===expectedIdentity)){
+        return{ok:true,verified:true,attempt,equipmentSlot:found.slot,item:found.item,identity:found.identity};
+      }
+      if(attempt<attempts)await sleep(verifyIntervalMs);
+    }
+    return{ok:false,error:'GEAR_EQUIP_NOT_VERIFIED',verified:false,attempts};
+  }
+
+  async function waitForEmpty(slot){
+    const key=String(slot||'');
+    const attempts=Math.max(1,Number(verifyAttempts)||1);
+    for(let attempt=1;attempt<=attempts;attempt++){
+      const equipment=await adapter.equipment();
+      if(!equipment||!equipment[key])return{ok:true,verified:true,attempt,slot:key};
+      if(attempt<attempts)await sleep(verifyIntervalMs);
+    }
+    return{ok:false,error:'GEAR_UNEQUIP_NOT_VERIFIED',slot:key,attempts};
+  }
+
+  async function clearSlotUnlocked(owner,slot){
+    const key=String(slot||'');
+    if(!key)return{ok:false,error:'GEAR_SLOT_REQUIRED'};
+    const equipment=await adapter.equipment();
+    if(!equipment||!equipment[key])return{ok:true,already:true,verified:true,slot:key,owner:String(owner||'')};
+    if(typeof adapter.unequip!=='function')return{ok:false,error:'GEAR_UNEQUIP_UNSUPPORTED',slot:key};
+    const result=await adapter.unequip(key);
+    if(result&&result.ok===false)return{ok:false,error:result.error||'GEAR_UNEQUIP_FAILED',result:clone(result),slot:key};
+    if(Number(settleMs)>0)await sleep(settleMs);
+    const proof=await waitForEmpty(key);
+    return{...proof,owner:String(owner||''),result:clone(result)};
+  }
+
+  async function equipRequestUnlocked(owner,request={}){
+    if(!request||!request.name)return{ok:false,error:'GEAR_REQUEST_INVALID'};
+
+    const beforeEquipment=await adapter.equipment();
+    const already=equippedMatch(beforeEquipment,request);
+    if(already){
+      return{
+        ok:true,verified:true,already:true,owner:String(owner||''),
+        equipped:already.identity,equipmentSlot:already.slot,phase:'READY'
+      };
+    }
+
+    const first=await locate(request);
+    if(!first.ok)return first;
+
+    // Real Adventure Land can move inventory slots between async operations.
+    // Re-locate immediately before equip instead of trusting the earlier slot.
+    const current=await locate(request);
+    if(!current.ok)return{ok:false,error:'GEAR_CHANGED_BEFORE_EQUIP'};
+    if(typeof adapter.equip!=='function')return{ok:false,error:'GEAR_EQUIP_UNSUPPORTED'};
+
+    const result=await adapter.equip(current.slot,request.slot||null);
+    if(result&&result.ok===false){
+      return{ok:false,error:result.error||'GEAR_EQUIP_FAILED',result:clone(result),phase:'EQUIP'};
+    }
+
+    if(Number(settleMs)>0)await sleep(settleMs);
+    const proof=await waitForEquipment(request,current.identity);
+    if(!proof.ok){
+      return{
+        ...proof,
+        owner:String(owner||''),
+        expectedIdentity:current.identity,
+        observedInventorySlot:current.slot,
+        result:clone(result),
+        phase:'VERIFY'
+      };
+    }
+
+    return{
+      ok:true,verified:true,owner:String(owner||''),result:clone(result),
+      equipped:current.identity,equipmentSlot:proof.equipmentSlot,
+      verifyAttempt:proof.attempt,phase:'READY'
+    };
+  }
+
+  async function equipExact(owner,request={}){
+    const exact={...request,level:request.level==null?0:request.level};
+    return serialized(()=>equipRequestUnlocked(owner,exact));
+  }
+
+  async function equipBest(owner,request={}){
+    return serialized(()=>equipRequestUnlocked(owner,{...request,selection:request.selection||'HIGHEST_LEVEL'}));
+  }
+
+  async function equipLoadout(owner,loadout={}){
+    return serialized(async()=>{
+      const trace=[];
+      for(const slot of loadout.clearSlots||[]){
+        const out=await clearSlotUnlocked(owner,slot);
+        trace.push({phase:'CLEAR',slot,result:clone(out)});
+        if(!out.ok)return{ok:false,error:out.error,owner:String(owner||''),loadout:String(loadout.name||''),trace};
+      }
+      for(const slot of ['mainhand','offhand']){
+        const selector=loadout[slot];
+        if(!selector)continue;
+        const out=await equipRequestUnlocked(owner,{...selector,slot});
+        trace.push({phase:'EQUIP',slot,result:clone(out)});
+        if(!out.ok)return{ok:false,error:out.error,owner:String(owner||''),loadout:String(loadout.name||''),trace};
+      }
+      return{ok:true,verified:true,owner:String(owner||''),loadout:String(loadout.name||''),trace,phase:'READY'};
+    });
+  }
+
+  function protectedIdentity(id){return protectedSet.has(String(id||''));}
+
+  async function status(){
+    return{
+      inventory:(await adapter.inventory()).map(clone),
+      equipment:clone(await adapter.equipment()),
+      protected:Array.from(protectedSet).sort(),
+      timing:{settleMs:Number(settleMs),verifyIntervalMs:Number(verifyIntervalMs),verifyAttempts:Number(verifyAttempts)}
+    };
+  }
+
+  return{
+    locate,locateExact,equipExact,equipBest,equipLoadout,
+    protectedIdentity,status,gearIdentity,matches
+  };
+}
+
+module.exports={createGearService,gearIdentity,matches};
+
+},{}],
+"ligaments/inventory/InventoryService.js":[function(require,module,exports){
+'use strict';
+
+function clone(v){return v==null?v:JSON.parse(JSON.stringify(v));}
+function identity(item){
+  if(!item)return null;
+  return [
+    String(item.name||''),
+    Number.isFinite(Number(item.level))?Number(item.level):0,
+    item.p==null?'':String(item.p),
+    item.stat_type==null?'':String(item.stat_type)
+  ].join('|');
+}
+
+function createInventoryService({adapter,now=Date.now}={}){
+  if(!adapter||typeof adapter.snapshot!=='function')throw new Error('INVENTORY_ADAPTER_REQUIRED');
+  const reservations=new Map();
+
+  async function snapshot(){
+    const items=await adapter.snapshot();
+    if(!Array.isArray(items))throw new Error('INVENTORY_SNAPSHOT_INVALID');
+    return items.map(clone);
+  }
+
+  async function slot(slotIndex){
+    const items=await snapshot();
+    return clone(items[Number(slotIndex)]||null);
+  }
+
+  async function find(name,{level=null,p=null}={}){
+    const items=await snapshot();
+    const target=String(name||'');
+    const out=[];
+    for(let i=0;i<items.length;i++){
+      const item=items[i];
+      if(!item||String(item.name||'')!==target)continue;
+      if(level!=null&&Number(item.level||0)!==Number(level))continue;
+      if(p!=null&&String(item.p||'')!==String(p))continue;
+      out.push({slot:i,item:clone(item),identity:identity(item)});
+    }
+    return out;
+  }
+
+  async function freeSlots(){
+    const items=await snapshot();
+    return items.reduce((n,item)=>n+(item?0:1),0);
+  }
+
+  async function reserve(slotIndex,owner,{expected=null}={}){
+    const idx=Number(slotIndex),who=String(owner||'');
+    if(!Number.isInteger(idx)||idx<0||!who)return{ok:false,error:'INVENTORY_RESERVATION_INVALID'};
+    const existing=reservations.get(idx);
+    if(existing&&existing.owner!==who)return{ok:false,error:'INVENTORY_SLOT_RESERVED',reservation:clone(existing)};
+    const item=await slot(idx);
+    if(!item)return{ok:false,error:'INVENTORY_SLOT_EMPTY'};
+    const actual=identity(item);
+    if(expected&&actual!==String(expected))return{ok:false,error:'INVENTORY_IDENTITY_CHANGED',actual,expected:String(expected)};
+    const row={slot:idx,owner:who,identity:actual,at:Number(now())};
+    reservations.set(idx,row);
+    return{ok:true,reservation:clone(row)};
+  }
+
+  function release(slotIndex,owner){
+    const idx=Number(slotIndex),who=String(owner||'');
+    const row=reservations.get(idx);
+    if(!row)return{ok:true,released:false};
+    if(row.owner!==who)return{ok:false,error:'INVENTORY_RESERVATION_OWNER_MISMATCH',reservation:clone(row)};
+    reservations.delete(idx);
+    return{ok:true,released:true};
+  }
+
+  async function transferReservation(slotIndex,fromOwner,toOwner,{expected=null}={}){
+    const idx=Number(slotIndex),from=String(fromOwner||''),to=String(toOwner||'');
+    if(!Number.isInteger(idx)||idx<0||!from||!to)return{ok:false,error:'INVENTORY_RESERVATION_TRANSFER_INVALID'};
+    const row=reservations.get(idx);
+    if(!row)return{ok:false,error:'INVENTORY_RESERVATION_REQUIRED'};
+    if(row.owner!==from)return{ok:false,error:'INVENTORY_RESERVATION_OWNER_MISMATCH',reservation:clone(row)};
+    const item=await slot(idx);
+    if(!item)return{ok:false,error:'INVENTORY_SLOT_EMPTY'};
+    const actual=identity(item);
+    if(expected&&actual!==String(expected))return{ok:false,error:'INVENTORY_IDENTITY_CHANGED',actual,expected:String(expected)};
+    const next={slot:idx,owner:to,identity:actual,at:Number(now()),transferred_from:from};
+    reservations.set(idx,next);
+    return{ok:true,reservation:clone(next),previous:clone(row)};
+  }
+
+  async function mutate(kind,{slot:slotIndex,owner,args=[]}={}){
+    const idx=Number(slotIndex),who=String(owner||'');
+    const row=reservations.get(idx);
+    if(!row||row.owner!==who)return{ok:false,error:'INVENTORY_RESERVATION_REQUIRED'};
+    const item=await slot(idx);
+    const actual=identity(item);
+    if(!item||actual!==row.identity)return{ok:false,error:'INVENTORY_IDENTITY_CHANGED',actual,expected:row.identity};
+    const fn=adapter[String(kind||'')];
+    if(typeof fn!=='function')return{ok:false,error:'INVENTORY_MUTATION_UNSUPPORTED',kind:String(kind||'')};
+    const result=await fn(idx,...(Array.isArray(args)?args:[]));
+    return{ok:!(result&&result.ok===false),result:clone(result),identity:row.identity};
+  }
+
+  function reservationsStatus(){return Array.from(reservations.values()).map(clone);}
+
+  return{snapshot,slot,find,freeSlots,reserve,release,transferReservation,mutate,reservations:reservationsStatus,identity};
+}
+
+module.exports={createInventoryService,identity};
+
+},{}],
+"ligaments/movement/MovementService.js":[function(require,module,exports){
+'use strict';
+
+function createMovementService({arbiter,adapter}={}){
+  if(!arbiter||typeof arbiter.acquire!=='function')throw new Error('MOVEMENT_ARBITER_REQUIRED');
+  if(!adapter||typeof adapter.move!=='function')throw new Error('MOVEMENT_ADAPTER_REQUIRED');
+
+  function acquire(owner,{priority=0}={}){
+    return arbiter.acquire('MOVEMENT',owner,{priority,allowPreempt:true});
+  }
+
+  function release(owner){return arbiter.release('MOVEMENT',owner);}
+
+  function canMove(owner){
+    const current=arbiter.owner('MOVEMENT');
+    return !!current&&current.owner===String(owner||'');
+  }
+
+  async function move(owner,target,options={}){
+    if(!canMove(owner)){
+      return{ok:false,error:'MOVEMENT_NOT_OWNED',owner:arbiter.owner('MOVEMENT')};
+    }
+    const result=await adapter.move(target,options);
+    return{ok:!(result&&result.ok===false),result};
+  }
+
+  function canMoveTo(target){
+    if(!target||typeof adapter.canMoveTo!=='function')return false;
+    try{return adapter.canMoveTo(target)===true;}catch{return false;}
+  }
+
+  async function town(owner){
+    if(!canMove(owner))return{ok:false,error:'MOVEMENT_NOT_OWNED'};
+    if(typeof adapter.town!=='function')return{ok:false,error:'TOWN_UNAVAILABLE'};
+    const result=await adapter.town();
+    return{ok:!(result&&result.ok===false),result};
+  }
+
+  async function transport(owner,target){
+    if(!canMove(owner))return{ok:false,error:'MOVEMENT_NOT_OWNED'};
+    if(!target||!target.to||!Number.isInteger(target.spawn))
+      return{ok:false,error:'TRANSPORT_TARGET_INVALID'};
+    if(typeof adapter.transport!=='function')return{ok:false,error:'TRANSPORT_UNAVAILABLE'};
+    const result=await adapter.transport(target);
+    return{ok:!(result&&result.ok===false),result};
+  }
+
+  async function smartMove(){
+    // Explicit failure preserves the old method shape without native side effects.
+    return{ok:false,error:'SMART_MOVE_BANNED_NORMAL_RUNTIME'};
+  }
+
+  return{acquire,release,canMove,canMoveTo,move,town,transport,smartMove,currentOwner:()=>arbiter.owner('MOVEMENT')};
+}
+
+module.exports={createMovementService};
+
+},{}],
+"ligaments/movement/RouteService.js":[function(require,module,exports){
+'use strict';
+
+const clone=value=>value==null?value:JSON.parse(JSON.stringify(value));
+const ACTIVE_STATES=new Set(['QUEUED','PLANNING','RUNNING','PAUSED','INTERRUPTED']);
+const TERMINAL_STATES=new Set(['ARRIVED','FAILED','CANCELLED']);
+
+function createRouteService({now=Date.now,maxRecoveryAttempts=3}={}){
+  maxRecoveryAttempts=Number(maxRecoveryAttempts);
+  if(!Number.isInteger(maxRecoveryAttempts)||maxRecoveryAttempts<1)throw new Error('ROUTE_MAX_RECOVERY_ATTEMPTS_INVALID');
+  const models=new Map();
+  let sourceRevision=null;
+  const state={
+    version:3,
+    shadowOnly:true,
+    characterRoutingConnected:false,
+    status:null,
+    routeOwner:null,
+    character:null,
+    destination:null,
+    runtimeRevision:null,
+    pendingRevision:null,
+    currentEdge:null,
+    currentCheckpoint:null,
+    lastConfirmedPosition:null,
+    recoveryAttempts:0,
+    maxRecoveryAttempts,
+    lastError:null,
+    lastResult:null,
+    lastReplanBoundary:null,
+    edgeHistory:[],
+    updatedAt:null
+  };
+
+  const active=()=>!!state.routeOwner&&ACTIVE_STATES.has(state.status);
+  const snapshot=()=>clone(state);
+  const touch=()=>{state.updatedAt=Number(now());};
+
+  function observeModel({revision,model}={}){
+    revision=Number(revision);
+    if(!Number.isInteger(revision)||revision<1)return{ok:false,error:'REVISION_INVALID'};
+    sourceRevision=revision;
+    if(model&&typeof model==='object')models.set(revision,clone(model));else models.delete(revision);
+    if(models.has(revision)){
+      if(state.runtimeRevision==null){
+        state.runtimeRevision=revision;
+        state.pendingRevision=null;
+      }else if(revision!==state.runtimeRevision){
+        if(active())state.pendingRevision=revision;
+        else{
+          state.runtimeRevision=revision;
+          state.pendingRevision=null;
+        }
+      }else state.pendingRevision=null;
+    }else if(active()&&revision!==state.runtimeRevision){
+      state.pendingRevision=revision;
+    }
+    touch();
+    return{ok:models.has(revision),revision,runtimeRevision:state.runtimeRevision,pendingRevision:state.pendingRevision};
+  }
+
+  function request({owner,character,destination,resumeCheckpoint=null}={}){
+    owner=String(owner||'');
+    if(!owner)return{ok:false,error:'ROUTE_OWNER_REQUIRED'};
+    if(destination==null)return{ok:false,error:'ROUTE_DESTINATION_REQUIRED'};
+    if(active())return{ok:false,error:'ROUTE_OWNER_BUSY',routeOwner:state.routeOwner,status:state.status};
+    const revision=state.runtimeRevision==null?sourceRevision:state.runtimeRevision;
+    if(revision==null||!models.has(revision))return{ok:false,error:'NO_ACTIVE_ROUTE_MODEL'};
+    state.routeOwner=owner;
+    state.character=String(character||'');
+    state.destination=clone(destination);
+    state.status='PLANNING';
+    state.runtimeRevision=revision;
+    state.pendingRevision=null;
+    state.currentEdge=null;
+    state.currentCheckpoint=resumeCheckpoint;
+    state.lastConfirmedPosition=null;
+    state.recoveryAttempts=0;
+    state.lastError=null;
+    state.lastResult=null;
+    state.lastReplanBoundary=null;
+    state.edgeHistory=[];
+    touch();
+    return{ok:true,status:state.status,routeOwner:state.routeOwner,runtimeRevision:state.runtimeRevision,pendingRevision:null,shadowOnly:true,characterRoutingConnected:false};
+  }
+
+  function markEdgeStarted(edgeId){
+    if(!active())return{ok:false,error:'NO_ACTIVE_ROUTE'};
+    if(state.status==='PAUSED'||state.status==='INTERRUPTED')return{ok:false,error:'ROUTE_NOT_RUNNABLE',status:state.status};
+    const id=String(edgeId||'');
+    if(!id)return{ok:false,error:'EDGE_ID_REQUIRED'};
+    state.currentEdge={edgeId:id,revision:state.runtimeRevision};
+    state.edgeHistory.push(clone(state.currentEdge));
+    state.status='RUNNING';
+    touch();
+    return{ok:true,status:state.status,edgeId:id,revision:state.runtimeRevision};
+  }
+
+  function markSafeCheckpoint(checkpointId,{position=null}={}){
+    if(!active())return{ok:false,error:'NO_ACTIVE_ROUTE'};
+    const checkpoint=String(checkpointId||'');
+    if(!checkpoint)return{ok:false,error:'CHECKPOINT_ID_REQUIRED'};
+    state.currentCheckpoint=checkpoint;
+    state.currentEdge=null;
+    if(position!=null)state.lastConfirmedPosition=clone(position);
+    state.recoveryAttempts=0;
+    touch();
+    if(state.pendingRevision!=null){
+      const next=state.pendingRevision;
+      if(!models.has(next)){
+        state.lastError='PENDING_REVISION_UNAVAILABLE';
+        return{ok:false,error:state.lastError,runtimeRevision:state.runtimeRevision,pendingRevision:next};
+      }
+      const previous=state.runtimeRevision;
+      state.runtimeRevision=next;
+      state.pendingRevision=null;
+      state.status='PLANNING';
+      state.lastError=null;
+      state.lastReplanBoundary={checkpointId:state.currentCheckpoint,fromRevision:previous,toRevision:next,at:Number(now())};
+    }
+    return{ok:true,status:state.status,runtimeRevision:state.runtimeRevision,pendingRevision:state.pendingRevision,checkpoint:state.currentCheckpoint};
+  }
+
+  function reportFailure(reason='ROUTE_FAILURE',detail=null){
+    if(!active())return{ok:false,error:'NO_ACTIVE_ROUTE'};
+    state.recoveryAttempts++;
+    state.currentEdge=null;
+    state.lastError=String(reason);
+    if(state.recoveryAttempts<state.maxRecoveryAttempts){
+      state.status='PLANNING';
+      state.lastResult={
+        type:'RECOVERY_REPLAN',
+        reason:state.lastError,
+        detail:clone(detail),
+        attempt:state.recoveryAttempts,
+        maxAttempts:state.maxRecoveryAttempts,
+        destination:clone(state.destination),
+        checkpoint:state.currentCheckpoint,
+        at:Number(now())
+      };
+      touch();
+      return{
+        ok:true,status:state.status,retrying:true,reason:
