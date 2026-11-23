@@ -1,0 +1,1666 @@
+top:async ctx=>typeof instance.stop==='function'?instance.stop(ctx):{ok:true},
+    detach:async ctx=>typeof instance.detach==='function'?instance.detach(ctx):{ok:true}
+  };
+}
+
+module.exports={createModuleCatalog,lifecycleFacade};
+
+},{"../../roles/RoleManifest":"roles/RoleManifest.js"}],
+"core/modules/ModuleContract.js":[function(require,module,exports){
+'use strict';
+
+const HOOKS=Object.freeze(['attach','start','pause','resume','health','snapshot','restore','stop','detach']);
+
+function clone(value){return value==null?value:JSON.parse(JSON.stringify(value));}
+
+function normalizeDescriptor(input={}){
+  const name=String(input.name||'').trim();
+  if(!name)throw new Error('MODULE_NAME_REQUIRED');
+  return Object.freeze({
+    schema:1,
+    name,
+    version:String(input.version||'1'),
+    critical:input.critical===true,
+    dependencies:Object.freeze([...(input.dependencies||[])].map(String)),
+    resources:Object.freeze([...(input.resources||[])].map(String))
+  });
+}
+
+function adaptModule(input={}){
+  const descriptor=normalizeDescriptor(input.descriptor||input);
+  const source=input.module||input;
+  const hooks={};
+  for(const hook of HOOKS){
+    hooks[hook]=typeof source[hook]==='function'?source[hook].bind(source):null;
+  }
+  return Object.freeze({descriptor,hooks});
+}
+
+function validateDependencies(module,available=[]){
+  const set=new Set((available||[]).map(String));
+  const missing=module.descriptor.dependencies.filter(name=>!set.has(name));
+  return{ok:missing.length===0,missing};
+}
+
+function publicModule(module){
+  return{
+    descriptor:clone(module.descriptor),
+    hooks:Object.fromEntries(HOOKS.map(name=>[name,!!module.hooks[name]]))
+  };
+}
+
+module.exports={HOOKS,normalizeDescriptor,adaptModule,validateDependencies,publicModule};
+
+},{}],
+"core/modules/ModuleSupervisor.js":[function(require,module,exports){
+'use strict';
+
+const {adaptModule,validateDependencies,publicModule}=require('./ModuleContract');
+
+function clone(value){return value==null?value:JSON.parse(JSON.stringify(value));}
+
+function createModuleSupervisor({now=Date.now,onAlert=null}={}){
+  const modules=Object.create(null);
+
+  async function emit(event,row,extra={}){
+    if(!onAlert)return null;
+    return onAlert({
+      kind:'MODULE_'+event,
+      event,
+      module:row.name,
+      critical:row.critical,
+      status:row.status,
+      error:row.error,
+      at:Number(now()),
+      ...clone(extra)
+    });
+  }
+
+  function register(name,module,{critical=false,version='1',dependencies=[],resources=[]}={}){
+    const key=String(name||'');
+    if(!key)throw new Error('MODULE_NAME_REQUIRED');
+    if(modules[key])throw new Error('MODULE_ALREADY_REGISTERED:'+key);
+    const adapted=adaptModule({
+      descriptor:{name:key,version,critical,dependencies,resources},
+      module
+    });
+    modules[key]={
+      name:key,
+      adapted,
+      critical:adapted.descriptor.critical,
+      status:'REGISTERED',
+      error:null,
+      updated_at:Number(now()),
+      failures:0,
+      attached:false,
+      started:false,
+      paused:false,
+      last_health:null,
+      last_snapshot:null
+    };
+    return status(key);
+  }
+
+  function requireRow(name){
+    const row=modules[String(name||'')];
+    if(!row)throw new Error('MODULE_NOT_FOUND:'+name);
+    return row;
+  }
+
+  function availableNames(){
+    return Object.values(modules)
+      .filter(row=>row.status!=='DETACHED')
+      .map(row=>row.name);
+  }
+
+  async function callHook(row,hook,args=[],fallback=null){
+    const fn=row.adapted.hooks[hook];
+    if(!fn)return fallback;
+    return fn(...args);
+  }
+
+  async function fail(row,error,event='FAILURE'){
+    row.failures++;
+    row.error=String(error&&error.message||error);
+    row.updated_at=Number(now());
+    row.status=row.critical?'CORE_FAILED':'DISABLED';
+    row.started=false;
+    row.paused=false;
+    await emit(event,row);
+    return{ok:false,module:status(row.name),error:row.error,core_ready:!row.critical};
+  }
+
+  async function attach(name,context={}){
+    const row=requireRow(name);
+    if(row.attached)return{ok:true,module:status(row.name),already_attached:true};
+    const deps=validateDependencies(row.adapted,availableNames());
+    if(!deps.ok)return fail(row,new Error('MODULE_DEPENDENCY_MISSING:'+deps.missing.join(',')),'ATTACH_FAILED');
+    try{
+      await callHook(row,'attach',[context]);
+      row.attached=true;
+      row.status='ATTACHED';
+      row.error=null;
+      row.updated_at=Number(now());
+      return{ok:true,module:status(row.name)};
+    }catch(error){return fail(row,error,'ATTACH_FAILED');}
+  }
+
+  async function start(name,context={}){
+    const row=requireRow(name);
+    if(!row.attached){
+      const a=await attach(name,context);
+      if(!a.ok)return a;
+    }
+    if(row.started&&!row.paused)return{ok:true,module:status(row.name),already_started:true};
+    try{
+      await callHook(row,'start',[context]);
+      row.started=true;
+      row.paused=false;
+      row.status='READY';
+      row.error=null;
+      row.updated_at=Number(now());
+      return{ok:true,module:status(row.name)};
+    }catch(error){return fail(row,error,'START_FAILED');}
+  }
+
+  async function pause(name,context={}){
+    const row=requireRow(name);
+    if(!row.started)return{ok:false,error:'MODULE_NOT_STARTED',module:status(row.name)};
+    if(row.paused)return{ok:true,module:status(row.name),already_paused:true};
+    try{
+      await callHook(row,'pause',[context]);
+      row.paused=true;
+      row.status='PAUSED';
+      row.updated_at=Number(now());
+      return{ok:true,module:status(row.name)};
+    }catch(error){return fail(row,error,'PAUSE_FAILED');}
+  }
+
+  async function resume(name,context={}){
+    const row=requireRow(name);
+    if(!row.started)return{ok:false,error:'MODULE_NOT_STARTED',module:status(row.name)};
+    if(!row.paused)return{ok:true,module:status(row.name),already_running:true};
+    try{
+      await callHook(row,'resume',[context]);
+      row.paused=false;
+      row.status='READY';
+      row.updated_at=Number(now());
+      return{ok:true,module:status(row.name)};
+    }catch(error){return fail(row,error,'RESUME_FAILED');}
+  }
+
+  async function health(name,context={}){
+    const row=requireRow(name);
+    if(row.status==='DISABLED'||row.status==='CORE_FAILED'||row.status==='DETACHED'){
+      return{ok:false,status:row.status,error:row.error,module:status(row.name)};
+    }
+    try{
+      const result=await callHook(row,'health',[context],{ok:true,status:row.status});
+      const normalized=result&&typeof result==='object'?result:{ok:result!==false};
+      row.last_health=clone(normalized);
+      row.updated_at=Number(now());
+      if(normalized.ok===false){
+        return fail(row,new Error(normalized.error||normalized.code||'MODULE_HEALTH_FAILED'),'HEALTH_FAILED');
+      }
+      return{ok:true,health:clone(normalized),module:status(row.name)};
+    }catch(error){return fail(row,error,'HEALTH_FAILED');}
+  }
+
+  async function healthAll(context={}){
+    const results=[];
+    for(const name of Object.keys(modules)){
+      const row=modules[name];
+      if(row.status==='DETACHED')continue;
+      results.push({name,result:await health(name,context)});
+    }
+    return{
+      results,
+      core_ready:results.every(entry=>entry.result.ok||modules[entry.name].critical===false)
+    };
+  }
+
+  async function snapshot(name,context={}){
+    const row=requireRow(name);
+    try{
+      const value=await callHook(row,'snapshot',[context],null);
+      row.last_snapshot=clone(value);
+      row.updated_at=Number(now());
+      return{ok:true,snapshot:clone(value),module:status(row.name)};
+    }catch(error){return fail(row,error,'SNAPSHOT_FAILED');}
+  }
+
+  async function restore(name,snapshotValue,context={}){
+    const row=requireRow(name);
+    try{
+      await callHook(row,'restore',[clone(snapshotValue),context]);
+      row.last_snapshot=clone(snapshotValue);
+      row.updated_at=Number(now());
+      return{ok:true,module:status(row.name)};
+    }catch(error){return fail(row,error,'RESTORE_FAILED');}
+  }
+
+  async function stop(name,context={}){
+    const row=requireRow(name);
+    if(!row.started)return{ok:true,module:status(row.name),already_stopped:true};
+    try{
+      await callHook(row,'stop',[context]);
+      row.started=false;
+      row.paused=false;
+      row.status=row.attached?'ATTACHED':'REGISTERED';
+      row.updated_at=Number(now());
+      return{ok:true,module:status(row.name)};
+    }catch(error){return fail(row,error,'STOP_FAILED');}
+  }
+
+  async function detach(name,context={}){
+    const row=requireRow(name);
+    if(row.started){
+      const stopped=await stop(name,context);
+      if(!stopped.ok)return stopped;
+    }
+    if(!row.attached){
+      row.status='DETACHED';
+      return{ok:true,module:status(row.name),already_detached:true};
+    }
+    try{
+      await callHook(row,'detach',[context]);
+      row.attached=false;
+      row.status='DETACHED';
+      row.updated_at=Number(now());
+      return{ok:true,module:status(row.name)};
+    }catch(error){return fail(row,error,'DETACH_FAILED');}
+  }
+
+  async function restart(name,context={}){
+    const row=requireRow(name);
+    if(row.started){
+      const s=await stop(name,context);
+      if(!s.ok)return s;
+    }
+    return start(name,context);
+  }
+
+  async function startAll(context={}){
+    const results=[];
+    for(const name of Object.keys(modules))results.push(await start(name,context));
+    return{results,core_ready:results.every(r=>r.ok||r.module.critical===false)};
+  }
+
+  async function stopAll(context={}){
+    const results=[];
+    for(const name of Object.keys(modules).reverse())results.push(await stop(name,context));
+    return{results};
+  }
+
+  function status(name){
+    const row=modules[String(name||'')];
+    if(!row)return null;
+    return{
+      name:row.name,
+      critical:row.critical,
+      status:row.status,
+      error:row.error,
+      updated_at:row.updated_at,
+      failures:row.failures,
+      attached:row.attached,
+      started:row.started,
+      paused:row.paused,
+      last_health:clone(row.last_health),
+      last_snapshot:clone(row.last_snapshot),
+      contract:publicModule(row.adapted)
+    };
+  }
+
+  function all(){return Object.keys(modules).sort().map(status);}
+
+  return{
+    register,attach,start,startAll,pause,resume,health,healthAll,snapshot,restore,
+    stop,stopAll,detach,restart,status,all
+  };
+}
+
+module.exports={createModuleSupervisor};
+
+},{"./ModuleContract":"core/modules/ModuleContract.js"}],
+"core/ownership/ResourceArbiter.js":[function(require,module,exports){
+'use strict';
+
+function clone(value){return value==null?value:JSON.parse(JSON.stringify(value));}
+
+function createResourceArbiter({now=Date.now}={}){
+  const resources=Object.create(null);
+
+  function acquire(resource,owner,{priority=0,allowPreempt=true}={}){
+    const key=String(resource||''),who=String(owner||'');
+    if(!key||!who)return{ok:false,error:'RESOURCE_AND_OWNER_REQUIRED'};
+    const current=resources[key];
+    if(!current||current.owner===who){
+      resources[key]={resource:key,owner:who,priority:Number(priority)||0,acquired_at:current?current.acquired_at:Number(now()),updated_at:Number(now())};
+      return{ok:true,lease:clone(resources[key]),preempted:null};
+    }
+    const requested=Number(priority)||0;
+    if(allowPreempt&&requested>Number(current.priority||0)){
+      const preempted=clone(current);
+      resources[key]={resource:key,owner:who,priority:requested,acquired_at:Number(now()),updated_at:Number(now())};
+      return{ok:true,lease:clone(resources[key]),preempted};
+    }
+    return{ok:false,error:'RESOURCE_OWNED',owner:clone(current)};
+  }
+
+  function release(resource,owner){
+    const key=String(resource||''),who=String(owner||'');
+    const current=resources[key];
+    if(!current)return{ok:true,released:false};
+    if(current.owner!==who)return{ok:false,error:'RESOURCE_OWNER_MISMATCH',owner:clone(current)};
+    delete resources[key];
+    return{ok:true,released:true};
+  }
+
+  function owner(resource){return clone(resources[String(resource||'')]||null);}
+  function all(){return Object.values(resources).map(clone);}
+  return{acquire,release,owner,all};
+}
+
+module.exports={createResourceArbiter};
+
+},{}],
+"core/policy/CharacterWhitelist.js":[function(require,module,exports){
+'use strict';
+
+const {CHARACTER_RULES}=require('../../organs/gear/GearRegistry');
+
+const MERCHANT='Rentaro';
+const MANUAL_AUTH='GILBERT_EXPLICIT';
+
+function normalizeCharacter(name){return String(name||'').trim();}
+
+function parseSelector(value){
+  const raw=String(value||'').trim();
+  const match=raw.match(/^([A-Za-z0-9_]+)(?:\s*\+(\d+))?$/);
+  if(!match)return null;
+  return Object.freeze({
+    raw,
+    name:match[1],
+    level:match[2]==null?null:Number(match[2])
+  });
+}
+
+function selectorsFor(character){
+  const name=normalizeCharacter(character);
+  const rule=CHARACTER_RULES[name];
+  if(!rule)return[];
+  return [...(rule.keep||[]),...(rule.loadout||[])]
+    .map(parseSelector)
+    .filter(Boolean);
+}
+
+function itemMatchesSelector(item,selector){
+  if(!item||!selector)return false;
+  if(String(item.name||'')!==selector.name)return false;
+  if(selector.level==null)return true;
+  return Number(item.level||0)===selector.level;
+}
+
+function protectionFor(character,item){
+  const matches=selectorsFor(character).filter(selector=>itemMatchesSelector(item,selector));
+  if(!matches.length)return{protected:false,character:normalizeCharacter(character)};
+  return{
+    protected:true,
+    character:normalizeCharacter(character),
+    reasons:matches.map(x=>x.raw),
+    owner:'V3_CHARACTER_WHITELIST'
+  };
+}
+
+function manualAuthorization(input={}){
+  return !!(
+    input.mode==='MANUAL_USER_COMMAND' &&
+    input.authorization===MANUAL_AUTH &&
+    String(input.requestedBy||'').trim().toLowerCase()==='gilbert'
+  );
+}
+
+function planTransfer(input={}){
+  const sender=normalizeCharacter(input.sender);
+  const receiver=normalizeCharacter(input.receiver);
+  const item=input.item||null;
+  if(!sender)return{ok:false,error:'TRANSFER_SENDER_REQUIRED'};
+  if(!receiver)return{ok:false,error:'TRANSFER_RECEIVER_REQUIRED'};
+  if(!item||!item.name)return{ok:false,error:'TRANSFER_ITEM_REQUIRED'};
+
+  const protection=protectionFor(sender,item);
+  const toMerchant=receiver===MERCHANT&&sender!==MERCHANT;
+
+  if(toMerchant&&protection.protected&&!manualAuthorization(input)){
+    return{
+      ok:false,
+      error:'CHARACTER_WHITELIST_PROTECTED',
+      reason:'NO_AUTOMATIC_TRANSFER_TO_MERCHANT',
+      sender,
+      receiver,
+      selector:{name:String(item.name),level:Number(item.level||0)},
+      protection
+    };
+  }
+
+  if(toMerchant&&protection.protected){
+    return{
+      ok:true,
+      allowed:true,
+      manualOverride:true,
+      audit:'GILBERT_EXPLICIT_TRANSFER',
+      sender,
+      receiver,
+      selector:{name:String(item.name),level:Number(item.level||0)},
+      relocateBeforeExecute:true,
+      verifyReceiverAfter:true,
+      sourceContract:'send_item(sender inventory slot -> receiver inventory)'
+    };
+  }
+
+  return{
+    ok:true,
+    allowed:true,
+    manualOverride:false,
+    sender,
+    receiver,
+    selector:{name:String(item.name),level:Number(item.level||0)},
+    relocateBeforeExecute:true,
+    verifyReceiverAfter:true,
+    sourceContract:'send_item(sender inventory slot -> receiver inventory)'
+  };
+}
+
+function filterAutoTransfersToMerchant(character,items=[]){
+  const sender=normalizeCharacter(character);
+  return (Array.isArray(items)?items:[]).map((item,index)=>{
+    const planned=planTransfer({sender,receiver:MERCHANT,item});
+    return{
+      index,
+      item,
+      transfer:planned.ok===true,
+      blocked:planned.ok!==true,
+      reason:planned.ok?'AUTO_TRANSFER_ALLOWED':planned.error
+    };
+  });
+}
+
+module.exports={
+  MERCHANT,
+  MANUAL_AUTH,
+  parseSelector,
+  selectorsFor,
+  itemMatchesSelector,
+  protectionFor,
+  manualAuthorization,
+  planTransfer,
+  filterAutoTransfersToMerchant
+};
+
+},{"../../organs/gear/GearRegistry":"organs/gear/GearRegistry.js"}],
+"core/policy/ExchangeApprovalPolicy.js":[function(require,module,exports){
+'use strict';
+
+const APPROVED_EXCHANGE_IDS=Object.freeze([
+  'armorbox',
+  'basketofeggs',
+  'brownenvelope',
+  'bugbountybox',
+  'candy0',
+  'candy1',
+  'candycane',
+  'gem0',
+  'glitch',
+  'greenenvelope',
+  'leather',
+  'mistletoe',
+  'mysterybox',
+  'ornament',
+  'weaponbox'
+]);
+
+const APPROVED_SET=new Set(APPROVED_EXCHANGE_IDS);
+
+function isApprovedExchangeId(itemId){
+  return APPROVED_SET.has(String(itemId||''));
+}
+
+function isExchangeableMeta(meta){
+  return !!(meta&&(meta.exchangeable===true||meta.exchange===true||Number(meta.e)>0));
+}
+
+function dispositionFor(item,meta){
+  const id=String(item&&item.name||'');
+  if(!id)return{action:'HOLD',reason:'ITEM_ID_REQUIRED'};
+  if(!isExchangeableMeta(meta))return{action:'NOT_EXCHANGEABLE',reason:'META_NOT_EXCHANGEABLE'};
+  if(isApprovedExchangeId(id))return{action:'EXCHANGE_APPROVED',reason:'USER_APPROVED_EXCHANGEABLE'};
+  return{action:'KEEP_MERCHANT',reason:'UNAPPROVED_EXCHANGEABLE_REVIEW_REQUIRED'};
+}
+
+module.exports={APPROVED_EXCHANGE_IDS,isApprovedExchangeId,isExchangeableMeta,dispositionFor};
+
+},{}],
+"core/recovery/BankRecoveryStore.js":[function(require,module,exports){
+'use strict';
+
+const BANK_RECOVERY_SCHEMA=1;
+const VALID_STEPS=Object.freeze(['ENTER','TRAVEL','SCAN','APPLY_POLICY','ORGANIZE','VERIFY','HANDOFF','PUBLISH','EXIT','COMPLETE']);
+
+function clone(v){return v==null?v:JSON.parse(JSON.stringify(v));}
+
+function validateSessionShape(session){
+  if(!session||typeof session!=='object')return{ok:false,error:'BANK_RECOVERY_SESSION_REQUIRED'};
+  if(session.version!==3||session.state!=='BANK')return{ok:false,error:'BANK_RECOVERY_SESSION_IDENTITY_INVALID'};
+  if(!VALID_STEPS.includes(String(session.step||'')))return{ok:false,error:'BANK_RECOVERY_STEP_INVALID'};
+  if(!Array.isArray(session.completed)||!session.proofs||typeof session.proofs!=='object'){
+    return{ok:false,error:'BANK_RECOVERY_SESSION_SHAPE_INVALID'};
+  }
+  return{ok:true};
+}
+
+function createBankRecoveryStore({
+  store,
+  character,
+  build,
+  now=Date.now
+}={}){
+  if(!store||typeof store.get!=='function'||typeof store.set!=='function'||typeof store.delete!=='function'){
+    throw new Error('BANK_RECOVERY_STORE_REQUIRED');
+  }
+  const who=String(character||'');
+  const buildId=String(build||'');
+  if(!who||!buildId)throw new Error('BANK_RECOVERY_IDENTITY_REQUIRED');
+
+  const key='bank_recovery:'+who;
+  let lastLoad=null;
+  let lastSave=null;
+
+  async function save(session,{reason='CHECKPOINT'}={}){
+    const valid=validateSessionShape(session);
+    if(!valid.ok)return valid;
+    const record={
+      schema:BANK_RECOVERY_SCHEMA,
+      version:'V3',
+      build:buildId,
+      character:who,
+      reason:String(reason||'CHECKPOINT'),
+      saved_at:Number(now()),
+      step:String(session.step),
+      completed:[...session.completed],
+      session:clone(session)
+    };
+    await store.set(key,record);
+    lastSave=clone(record);
+    return{ok:true,record:clone(record)};
+  }
+
+  async function load(){
+    const record=await store.get(key);
+    if(record==null){
+      lastLoad={ok:true,found:false,reason:'NO_CHECKPOINT'};
+      return clone(lastLoad);
+    }
+    if(!record||record.schema!==BANK_RECOVERY_SCHEMA||record.version!=='V3'){
+      lastLoad={ok:false,found:true,error:'BANK_RECOVERY_RECORD_INVALID'};
+      return clone(lastLoad);
+    }
+    if(String(record.character||'')!==who){
+      lastLoad={ok:false,found:true,error:'BANK_RECOVERY_CHARACTER_MISMATCH'};
+      return clone(lastLoad);
+    }
+    if(String(record.build||'')!==buildId){
+      lastLoad={
+        ok:false,found:true,error:'BANK_RECOVERY_BUILD_MISMATCH',
+        saved_build:String(record.build||''),expected_build:buildId
+      };
+      return clone(lastLoad);
+    }
+    const valid=validateSessionShape(record.session);
+    if(!valid.ok){
+      lastLoad={ok:false,found:true,error:valid.error};
+      return clone(lastLoad);
+    }
+    lastLoad={
+      ok:true,found:true,
+      reason:String(record.reason||'CHECKPOINT'),
+      saved_at:Number(record.saved_at||0),
+      step:String(record.session.step),
+      completed:[...record.session.completed],
+      session:clone(record.session)
+    };
+    return clone(lastLoad);
+  }
+
+  async function clear({reason='CLEARED'}={}){
+    await store.delete(key);
+    lastSave={
+      schema:BANK_RECOVERY_SCHEMA,
+      version:'V3',
+      build:buildId,
+      character:who,
+      reason:String(reason||'CLEARED'),
+      cleared_at:Number(now()),
+      cleared:true
+    };
+    return{ok:true};
+  }
+
+  function status(){
+    return{
+      key,
+      character:who,
+      build:buildId,
+      last_load:clone(lastLoad),
+      last_save:clone(lastSave)
+    };
+  }
+
+  return{key,save,load,clear,status,validateSessionShape};
+}
+
+module.exports={BANK_RECOVERY_SCHEMA,VALID_STEPS,validateSessionShape,createBankRecoveryStore};
+
+},{}],
+"core/recovery/RecoveryCoordinator.js":[function(require,module,exports){
+'use strict';
+
+const DEFAULT_LIMITS=Object.freeze({movement:3,state:2,controller:2,frame:1,browser:1});
+const DEFAULT_ESCALATION=Object.freeze({
+  movement:'state',
+  state:'controller',
+  controller:'frame',
+  frame:'browser',
+  browser:null
+});
+
+function createRecoveryCoordinator({limits=DEFAULT_LIMITS,escalation=DEFAULT_ESCALATION}={}){
+  const attempts=Object.create(null);
+
+  function count(scope){return Number(attempts[String(scope||'unknown')]||0);}
+
+  function request(scope){
+    const key=String(scope||'unknown');
+    const limit=Number(limits[key]??1);
+    const next=count(key)+1;
+    attempts[key]=next;
+    if(next<=limit)return{ok:true,scope:key,attempt:next,limit,action:'RECOVER_SUBSYSTEM'};
+
+    const nextScope=escalation[key]===undefined?(key==='browser'?null:'browser'):escalation[key];
+    if(nextScope){
+      return{ok:false,scope:key,attempt:next,limit,action:'ESCALATE',next_scope:String(nextScope)};
+    }
+    return{ok:false,scope:key,attempt:next,limit,action:'STOP_AND_ALERT'};
+  }
+
+  function reset(scope){
+    if(scope)delete attempts[String(scope)];
+    else for(const key of Object.keys(attempts))delete attempts[key];
+  }
+
+  function status(){
+    return{
+      attempts:Object.assign({},attempts),
+      limits:Object.assign({},limits),
+      escalation:Object.assign({},escalation)
+    };
+  }
+
+  return{request,reset,status};
+}
+
+module.exports={createRecoveryCoordinator,DEFAULT_LIMITS,DEFAULT_ESCALATION};
+
+},{}],
+"core/recovery/RecoveryExecutor.js":[function(require,module,exports){
+'use strict';
+
+function clone(value){return value==null?value:JSON.parse(JSON.stringify(value));}
+
+function createRecoveryExecutor({coordinator,handlers={}}={}){
+  if(!coordinator||typeof coordinator.request!=='function')throw new Error('RECOVERY_EXECUTOR_COORDINATOR_REQUIRED');
+
+  const registered=new Map();
+  for(const [scope,handler] of Object.entries(handlers||{})){
+    if(typeof handler==='function')registered.set(String(scope),handler);
+  }
+
+  function register(scope,handler){
+    const key=String(scope||'');
+    if(!key)throw new Error('RECOVERY_SCOPE_REQUIRED');
+    if(typeof handler!=='function')throw new Error('RECOVERY_HANDLER_REQUIRED:'+key);
+    registered.set(key,handler);
+    return api;
+  }
+
+  function unregister(scope){
+    registered.delete(String(scope||''));
+    return api;
+  }
+
+  async function recover(scope,context={},chain=[]){
+    const key=String(scope||'unknown');
+    if(chain.length>8)return{ok:false,scope:key,action:'STOP_AND_ALERT',error:'RECOVERY_ESCALATION_LOOP',chain:chain.slice()};
+
+    const plan=coordinator.request(key);
+    const nextChain=chain.concat([{scope:key,action:plan.action,attempt:plan.attempt,limit:plan.limit}]);
+
+    if(plan.action==='RECOVER_SUBSYSTEM'){
+      const handler=registered.get(key);
+      if(!handler){
+        return{
+          ok:false,executed:false,scope:key,action:plan.action,
+          error:'RECOVERY_HANDLER_MISSING:'+key,plan:clone(plan),chain:nextChain
+        };
+      }
+      try{
+        const result=await handler({...clone(context),scope:key,plan:clone(plan)});
+        const ok=!(result&&result.ok===false);
+        const deferred=!!(result&&result.deferred===true);
+        if(deferred)coordinator.reset(key);
+        return{
+          ok,executed:true,deferred,scope:key,action:plan.action,
+          result:clone(result),plan:clone(plan),chain:nextChain,
+          error:ok?null:String(result&&result.error||'RECOVERY_HANDLER_FAILED')
+        };
+      }catch(error){
+        return{
+          ok:false,executed:true,scope:key,action:plan.action,
+          error:String(error&&error.message||error),plan:clone(plan),chain:nextChain
+        };
+      }
+    }
+
+    if(plan.action==='ESCALATE'&&plan.next_scope){
+      return recover(plan.next_scope,{...clone(context),escalated_from:key},nextChain);
+    }
+
+    return{
+      ok:false,executed:false,scope:key,action:'STOP_AND_ALERT',
+      error:'RECOVERY_EXHAUSTED:'+key,plan:clone(plan),chain:nextChain
+    };
+  }
+
+  function reset(scope){coordinator.reset(scope);return status();}
+  function status(){
+    return{
+      coordinator:coordinator.status(),
+      handlers:Array.from(registered.keys()).sort()
+    };
+  }
+
+  const api={register,unregister,recover,reset,status};
+  return api;
+}
+
+module.exports={createRecoveryExecutor};
+
+},{}],
+"core/recovery/RecoveryImageGuard.js":[function(require,module,exports){
+'use strict';
+
+function clean(value){return String(value==null?'':value).trim();}
+function isSha256(value){return /^[a-f0-9]{64}$/i.test(clean(value));}
+function unique(values){return [...new Set(values)];}
+
+function createRecoveryImageGuard({manifest}={}){
+  if(!manifest)throw new Error('V3_RECOVERY_MANIFEST_REQUIRED');
+
+  function verifyImage(image={}){
+    const failures=[];
+    const files=Array.isArray(image.files)?image.files:[];
+    const snapshotId=clean(image.snapshot_id);
+    const treeHash=clean(image.tree_hash);
+
+    if(Number(image.schema)!==1)failures.push('RECOVERY_SCHEMA_INVALID');
+    if(clean(image.brain)!=='V3')failures.push('RECOVERY_BRAIN_NOT_V3');
+    if(clean(image.build)!==clean(manifest.build))failures.push('RECOVERY_BUILD_MISMATCH');
+    if(clean(image.root)!==clean(manifest.root))failures.push('RECOVERY_ROOT_MISMATCH');
+    if(!snapshotId)failures.push('RECOVERY_SNAPSHOT_ID_MISSING');
+    if(!isSha256(treeHash))failures.push('RECOVERY_TREE_HASH_INVALID');
+    if(!files.length)failures.push('RECOVERY_FILE_SET_EMPTY');
+
+    const paths=[];
+    for(const row of files){
+      const p=clean(row&&row.path).replace(/\\/g,'/');
+      paths.push(p);
+      if(!p.startsWith(clean(manifest.root)+'/'))failures.push('RECOVERY_FILE_OUTSIDE_V3:'+p);
+      if(!isSha256(row&&row.sha256))failures.push('RECOVERY_FILE_HASH_INVALID:'+p);
+      if(!Number.isFinite(Number(row&&row.bytes))||Number(row&&row.bytes)<1)failures.push('RECOVERY_FILE_BYTES_INVALID:'+p);
+    }
+    if(unique(paths).length!==paths.length)failures.push('RECOVERY_DUPLICATE_PATH');
+    if(!paths.includes(clean(manifest.entrypoint)))failures.push('RECOVERY_ENTRYPOINT_MISSING');
+    if(!paths.includes(clean(manifest.root)+'/bootstrap/Manifest.js'))failures.push('RECOVERY_MANIFEST_FILE_MISSING');
+
+    return{
+      ok:failures.length===0,
+      failures:unique(failures),
+      snapshot_id:snapshotId||null,
+      tree_hash:treeHash||null,
+      build:clean(image.build)||null,
+      files:files.length
+    };
+  }
+
+  function verifyRuntimeProof(proof={},image={}){
+    const checked=verifyImage(image);
+    const failures=checked.failures.slice();
+    if(clean(proof.version)!=='V3')failures.push('RUNTIME_NOT_V3');
+    if(clean(proof.build)!==clean(image.build))failures.push('RUNTIME_RECOVERY_BUILD_MISMATCH');
+    if(clean(proof.recovery_snapshot_id)!==clean(image.snapshot_id))failures.push('RUNTIME_RECOVERY_SNAPSHOT_MISMATCH');
+    if(clean(proof.recovery_tree_hash)!==clean(image.tree_hash))failures.push('RUNTIME_RECOVERY_TREE_HASH_MISMATCH');
+    return{ok:failures.length===0,failures:unique(failures)};
+  }
+
+  return{verifyImage,verifyRuntimeProof};
+}
+
+module.exports={createRecoveryImageGuard};
+
+},{}],
+"core/recovery/RecoveryVerifier.js":[function(require,module,exports){
+'use strict';
+
+function text(value){return String(value==null?'':value).trim();}
+function normalizeRecovery(value){
+  if(!value||typeof value!=='object')return null;
+  const snapshotId=text(value.snapshot_id);
+  const treeHash=text(value.tree_hash);
+  if(!snapshotId&&!treeHash)return null;
+  return{snapshot_id:snapshotId,tree_hash:treeHash};
+}
+function addFailure(row,reason){
+  if(!row.failures.includes(reason))row.failures.push(reason);
+  row.ok=false;
+}
+
+function createRecoveryVerifier({
+  requiredCharacters=['Rentaro','Hibari','Souji','Harutora'],
+  expectedBuild,
+  expectedRecovery=null,
+  maxHeartbeatAgeMs=15000,
+  maxProgressAgeMs=60000,
+  maxRuntimeProofAgeMs=15000,
+  now=Date.now
+}={}){
+  const configuredRecovery=normalizeRecovery(expectedRecovery);
+
+  function verifyCharacter(name,input={},recovery=configuredRecovery){
+    const failures=[];
+    if(input.online!==true)failures.push('OFFLINE');
+    if(input.runtime_proof!==true)failures.push('RUNTIME_PROOF_MISSING');
+    if(input.healthy!==true)failures.push('RUNTIME_NOT_HEALTHY');
+
+    const explicitProofAge=input.runtime_proof_age_ms;
+    const proofUpdatedAt=input.runtime_proof_updated_at??input.updated_at;
+    let proofAge=Infinity;
+    if(explicitProofAge!==null&&explicitProofAge!==undefined&&Number.isFinite(Number(explicitProofAge))){
+      proofAge=Math.max(0,Number(explicitProofAge));
+    }else if(proofUpdatedAt!==null&&proofUpdatedAt!==undefined&&Number.isFinite(Number(proofUpdatedAt))){
+      proofAge=Math.max(0,Number(now())-Number(proofUpdatedAt));
+    }
+    if(proofAge>maxRuntimeProofAgeMs)failures.push('RUNTIME_PROOF_STALE');
+    if(expectedBuild&&text(input.build)!==text(expectedBuild))failures.push('WRONG_BUILD');
+    if(input.frame_lease!==true)failures.push('FRAME_LEASE_MISSING');
+    if(input.lifecycle!=='ACTIVE')failures.push('LIFECYCLE_NOT_ACTIVE');
+
+    const heartbeatKnown=input.heartbeat_age_ms!==null&&input.heartbeat_age_ms!==undefined;
+    const progressKnown=input.progress_age_ms!==null&&input.progress_age_ms!==undefined;
+    const heartbeatAge=Number(input.heartbeat_age_ms);
+    const progressAge=Number(input.progress_age_ms);
+    if(input.controller_fresh!==true||!heartbeatKnown||!Number.isFinite(heartbeatAge)||heartbeatAge>maxHeartbeatAgeMs){
+      failures.push('CONTROLLER_HEARTBEAT_STALE');
+    }
+    if(input.productive!==true||!progressKnown||!Number.isFinite(progressAge)||progressAge>maxProgressAgeMs){
+      failures.push('PRODUCTIVE_PROGRESS_STALE');
+    }
+
+    if(recovery){
+      if(!text(input.recovery_snapshot_id))failures.push('RECOVERY_SNAPSHOT_ID_MISSING');
+      else if(text(input.recovery_snapshot_id)!==recovery.snapshot_id)failures.push('WRONG_RECOVERY_SNAPSHOT');
+      if(!text(input.recovery_tree_hash))failures.push('RECOVERY_TREE_HASH_MISSING');
+      else if(text(input.recovery_tree_hash)!==recovery.tree_hash)failures.push('WRONG_RECOVERY_TREE_HASH');
+    }
+
+    return{character:name,ok:failures.length===0,failures};
+  }
+
+  function verify(snapshot={}){
+    const characters={};
+    const inputs=snapshot.characters||{};
+    const requestedRecovery=normalizeRecovery(snapshot.expected_recovery)||configuredRecovery;
+    const ids=new Set();
+    const hashes=new Set();
+    let idCount=0;
+    let hashCount=0;
+    let anyGeneration=false;
+
+    for(const name of requiredCharacters){
+      const input=inputs[name]||{};
+      const id=text(input.recovery_snapshot_id);
+      const hash=text(input.recovery_tree_hash);
+      if(id||hash)anyGeneration=true;
+      if(id){ids.add(id);idCount++;}
+      if(hash){hashes.add(hash);hashCount++;}
+      characters[name]=verifyCharacter(name,input,requestedRecovery);
+    }
+
+    const failures=[];
+    if(anyGeneration){
+      if(ids.size>1)failures.push('MIXED_RECOVERY_SNAPSHOT');
+      if(hashes.size>1)failures.push('MIXED_RECOVERY_TREE_HASH');
+      if(idCount!==requiredCharacters.length)failures.push('RECOVERY_SNAPSHOT_INCOMPLETE');
+      if(hashCount!==requiredCharacters.length)failures.push('RECOVERY_TREE_HASH_INCOMPLETE');
+      for(const name of requiredCharacters){
+        const input=inputs[name]||{};
+        if(!text(input.recovery_snapshot_id))addFailure(characters[name],'RECOVERY_SNAPSHOT_ID_MISSING');
+        if(!text(input.recovery_tree_hash))addFailure(characters[name],'RECOVERY_TREE_HASH_MISSING');
+      }
+    }
+
+    if(requestedRecovery){
+      if(!requestedRecovery.snapshot_id)failures.push('EXPECTED_RECOVERY_SNAPSHOT_MISSING');
+      if(!/^[a-f0-9]{64}$/i.test(requestedRecovery.tree_hash))failures.push('EXPECTED_RECOVERY_TREE_HASH_INVALID');
+    }
+
+    const ok=failures.length===0&&requiredCharacters.every(name=>characters[name].ok);
+    return{
+      ok,
+      chrome_only_success:false,
+      required_characters:requiredCharacters.slice(),
+      expected_recovery:requestedRecovery,
+      failures,
+      characters,
+      result:ok?'RECOVERY_VERIFIED':'RECOVERY_NOT_VERIFIED'
+    };
+  }
+
+  return{verify,verifyCharacter};
+}
+
+module.exports={createRecoveryVerifier};
+
+},{}],
+"core/runtime/ActivationGate.js":[function(require,module,exports){
+'use strict';
+
+const {validateBridge}=require('../../adapters/bridge/BridgeV3Contract');
+
+function createActivationGate({manifest,staleGuard}={}){
+  if(!manifest)throw new Error('ACTIVATION_MANIFEST_REQUIRED');
+  if(!staleGuard||typeof staleGuard.verifyEntrypoint!=='function')throw new Error('ACTIVATION_STALE_GUARD_REQUIRED');
+
+  function verify({
+    mode='development',
+    root=(typeof globalThis!=='undefined'?globalThis:{}),
+    character,
+    frameId,
+    entrypoint=manifest.entrypoint,
+    build=manifest.build
+  }={}){
+    const kind=String(mode||'development').toLowerCase();
+    const failures=[];
+
+    const stale=staleGuard.verifyEntrypoint({entrypoint,build});
+    failures.push(...stale.failures);
+
+    if(!String(character||''))failures.push('CHARACTER_MISSING');
+    if(!String(frameId||''))failures.push('FRAME_ID_MISSING');
+
+    let bridge=null;
+    if(kind==='shadow'||kind==='live'){
+      bridge=validateBridge(root,character,{requireRecovery:kind==='live'});
+      if(!bridge.ok)failures.push(...bridge.failures);
+      if(bridge.bridge&&bridge.bridge.frame_id&&String(bridge.bridge.frame_id)!==String(frameId||''))failures.push('FRAME_ID_MISMATCH');
+    }
+
+    // Supervised P1 is a separate user-present test mode, NOT production/live.
+    // The exact approved one-tab session must have been installed by its verified CODE runner.
+    if(kind==='supervised'){
+      const a=root&&root.__POGI_V3_SUPERVISED_APPROVAL;
+      if(!a||a.userPresent!==true||a.singleTab!==true||a.noRecovery!==true||
+        a.character!==character||!/^[A-Za-z0-9_-]{12,80}$/.test(a.sessionId||'')||
+        !/^[a-f0-9]{40}$/.test(a.sourceCommit||'')||
+        !/^[a-f0-9]{40}$/.test(a.releaseCommit||'')||
+        !root.__POGI_V3_LOADER_STATUS||root.__POGI_V3_LOADER_STATUS.ok!==true||
+        root.__POGI_V3_LOADER_STATUS.installed!==true||
+        root.__POGI_V3_LOADER_STATUS.role!==character||
+        root.__POGI_V3_LOADER_STATUS.sourceCommit!==a.sourceCommit||
+        root.__POGI_V3_LOADER_STATUS.releaseCommit!==a.releaseCommit){
+        failures.push('V3_SUPERVISED_VERIFIED_SESSION_REQUIRED');
+      }
+    }
+
+    if(kind==='live'&&manifest.production_selectable!==true)failures.push('V3_PRODUCTION_DISABLED');
+    if(kind==='live'&&(!manifest.recovery_policy||manifest.recovery_policy.external_restore_ready!==true)){
+      failures.push('V3_RECOVERY_CONTROL_PLANE_NOT_READY');
+    }
+    if(kind==='live'&&manifest.recovery_policy){
+      if(manifest.recovery_policy.automatic_rollback_requires_production_identity!==true){
+        failures.push('V3_RECOVERY_PRODUCTION_IDENTITY_GUARD_NOT_READY');
+      }
+      if(manifest.recovery_policy.recovery_hold_requires_expected_production!==true){
+        failures.push('V3_RECOVERY_HOLD_ALIGNMENT_GUARD_NOT_READY');
+      }
+      if(manifest.recovery_policy.alignment_watchdog!==true){
+        failures.push('V3_RECOVERY_ALIGNMENT_WATCHDOG_NOT_READY');
+      }
+      if(manifest.recovery_policy.promotion_requires_post_write_alignment!==true){
+        failures.push('V3_RECOVERY_POST_PROMOTION_ALIGNMENT_NOT_READY');
+      }
+    }
+    if(!['development','shadow','live','supervised'].includes(kind))failures.push('ACTIVATION_MODE_INVALID');
+
+    return{
+      ok:failures.length===0,
+      mode:kind,
+      failures:[...new Set(failures)],
+      control_enabled:kind==='live'&&failures.length===0,
+      shadow_only:kind==='shadow',
+      bridge:bridge&&bridge.bridge||null,
+      build:manifest.build,
+      entrypoint:manifest.entrypoint
+    };
+  }
+
+  return{verify};
+}
+
+module.exports={createActivationGate};
+
+},{"../../adapters/bridge/BridgeV3Contract":"adapters/bridge/BridgeV3Contract.js"}],
+"core/runtime/FrameLease.js":[function(require,module,exports){
+'use strict';
+
+function clone(value){return value==null?value:JSON.parse(JSON.stringify(value));}
+
+function createFrameLease({store,character,frameId,epoch,ttlMs=15000,now=Date.now}={}){
+  if(!store||typeof store.get!=='function'||typeof store.set!=='function'||typeof store.delete!=='function')throw new Error('FRAME_LEASE_STORE_REQUIRED');
+  const name=String(character||'');
+  const frame=String(frameId||'');
+  const ep=String(epoch||'');
+  if(!name||!frame||!ep)throw new Error('FRAME_LEASE_IDENTITY_REQUIRED');
+  const key='v3:frame-lease:'+name;
+
+  function mine(row){
+    return !!row&&row.character===name&&row.frame_id===frame&&row.epoch===ep;
+  }
+
+  async function acquire(){
+    const t=Number(now());
+    const current=await store.get(key);
+    if(current&&!mine(current)&&Number(current.expires_at||0)>t){
+      return{ok:false,error:'FRAME_ALREADY_OWNED',owner:clone(current)};
+    }
+    const row={schema:1,character:name,frame_id:frame,epoch:ep,acquired_at:t,renewed_at:t,expires_at:t+ttlMs};
+    await store.set(key,row);
+    const proof=await store.get(key);
+    return mine(proof)?{ok:true,lease:clone(proof)}:{ok:false,error:'FRAME_LEASE_RACE_LOST',owner:clone(proof)};
+  }
+
+  async function renew(){
+    const t=Number(now());
+    const current=await store.get(key);
+    if(!mine(current))return{ok:false,error:'FRAME_LEASE_LOST',owner:clone(current)};
+    current.renewed_at=t;
+    current.expires_at=t+ttlMs;
+    await store.set(key,current);
+    return{ok:true,lease:clone(current)};
+  }
+
+  async function release(){
+    const current=await store.get(key);
+    if(!mine(current))return{ok:false,error:'FRAME_LEASE_NOT_OWNED',owner:clone(current)};
+    await store.delete(key);
+    return{ok:true};
+  }
+
+  async function status(){
+    const current=await store.get(key);
+    const t=Number(now());
+    return{
+      mine:mine(current)&&Number(current.expires_at||0)>t,
+      expired:!!current&&Number(current.expires_at||0)<=t,
+      lease:clone(current)
+    };
+  }
+
+  return{acquire,renew,release,status,key};
+}
+
+module.exports={createFrameLease};
+
+},{}],
+"core/runtime/RuntimeEpoch.js":[function(require,module,exports){
+'use strict';
+
+function safeText(value,max=160){
+  return String(value==null?'':value).replace(/[^A-Za-z0-9._:-]/g,'_').slice(0,max);
+}
+
+function createRuntimeEpoch({build,character,frameId,now=Date.now,nonce}={}){
+  const b=safeText(build||'UNKNOWN');
+  const c=safeText(character||'UNKNOWN');
+  const f=safeText(frameId||'UNKNOWN');
+  const n=safeText(nonce||Math.random().toString(36).slice(2,10));
+  const startedAt=Number(now());
+  return Object.freeze({
+    schema:1,
+    build:b,
+    character:c,
+    frame_id:f,
+    started_at:startedAt,
+    epoch:[b,c,f,startedAt,n].join(':')
+  });
+}
+
+function sameBuild(a,b){
+  return !!a&&!!b&&String(a.build)===String(b.build);
+}
+
+function sameEpoch(a,b){
+  return !!a&&!!b&&String(a.epoch)===String(b.epoch);
+}
+
+module.exports={createRuntimeEpoch,sameBuild,sameEpoch};
+
+},{}],
+"core/runtime/RuntimeProof.js":[function(require,module,exports){
+'use strict';
+
+function clone(value){return value==null?value:JSON.parse(JSON.stringify(value));}
+
+function createRuntimeProof({
+  root=(typeof globalThis!=='undefined'?globalThis:{}),
+  manifest,
+  epoch,
+  lifecycle,
+  heartbeat,
+  frameLease,
+  recoveryIdentity=null,
+  now=Date.now
+}={}){
+  if(!manifest||!epoch)throw new Error('RUNTIME_PROOF_IDENTITY_REQUIRED');
+  const KEY='__POGI_V3_RUNTIME_PROOF';
+  const recovery=recoveryIdentity&&typeof recoveryIdentity==='object'?{
+    snapshot_id:String(recoveryIdentity.snapshot_id||'').trim()||null,
+    tree_hash:String(recoveryIdentity.tree_hash||'').trim()||null
+  }:null;
+
+  async function snapshot(){
+    const life=lifecycle&&typeof lifecycle.status==='function'?lifecycle.status(epoch.character):null;
+    const hb=heartbeat&&typeof heartbeat.status==='function'?heartbeat.status(epoch.character):null;
+    const lease=frameLease&&typeof frameLease.status==='function'?await frameLease.status():null;
+    return{
+      schema:1,
+      version:'V3',
+      build:manifest.build,
+      root:manifest.root,
+      entrypoint:manifest.entrypoint,
+      character:epoch.character,
+      frame_id:epoch.frame_id,
+      epoch:epoch.epoch,
+      lifecycle:life&&life.stage||'BOOT',
+      healthy:!!(life&&life.healthy),
+      controller_fresh:!!(hb&&hb.controller_fresh),
+      heartbeat_age_ms:hb&&Number.isFinite(Number(hb.heartbeat_age_ms))?Number(hb.heartbeat_age_ms):null,
+      productive:!!(hb&&hb.productive),
+      progress_held:!!(hb&&hb.progress_held),
+      progress_hold_reason:hb&&hb.progress_hold_reason||null,
+      progress_age_ms:hb&&Number.isFinite(Number(hb.progress_age_ms))?Number(hb.progress_age_ms):null,
+      progress_count:hb&&Number.isFinite(Number(hb.progress_count))?Number(hb.progress_count):0,
+      last_progress:hb&&hb.last_progress?clone(hb.last_progress):null,
+      frame_lease:!!(lease&&lease.mine),
+      recovery_snapshot_id:recovery&&recovery.snapshot_id||null,
+      recovery_tree_hash:recovery&&recovery.tree_hash||null,
+      updated_at:Number(now())
+    };
+  }
+
+  async function publish(){
+    const proof=await snapshot();
+    root[KEY]=proof;
+    return clone(proof);
+  }
+
+  function clear(){
+    try{delete root[KEY];}catch{root[KEY]=null;}
+  }
+
+  return{publish,snapshot,clear,key:KEY};
+}
+
+module.exports={createRuntimeProof};
+
+},{}],
+"core/runtime/StaleCodeGuard.js":[function(require,module,exports){
+'use strict';
+
+function createStaleCodeGuard({manifest,root=(typeof globalThis!=='undefined'?globalThis:{}),storage=(typeof globalThis!=='undefined'?globalThis.localStorage:null),now=Date.now}={}){
+  if(!manifest)throw new Error('STALE_CODE_MANIFEST_REQUIRED');
+  const BUILD_KEY='Pogi_V3_Expected_Build_v1';
+  const BOOT_KEY='Pogi_V3_Last_Boot_Proof_v1';
+  const RECOVERY_KEY='Pogi_V3_Recovery_Generation_v1';
+
+  function normalizeRecovery(input){
+    if(!input||typeof input!=='object')return null;
+    const snapshotId=String(input.snapshot_id||'').trim();
+    const treeHash=String(input.tree_hash||'').trim();
+    if(!snapshotId&&!treeHash)return null;
+    if(!snapshotId||!/^[a-f0-9]{64}$/i.test(treeHash))throw new Error('V3_RECOVERY_GENERATION_INVALID');
+    return{snapshot_id:snapshotId,tree_hash:treeHash};
+  }
+
+  function expectedRecovery(){
+    if(!storage||typeof storage.getItem!=='function')return null;
+    const raw=storage.getItem(RECOVERY_KEY);
+    if(!raw)return null;
+    try{return normalizeRecovery(JSON.parse(raw));}
+    catch{return null;}
+  }
+
+  function arm(recovery){
+    if(storage&&typeof storage.setItem==='function')storage.setItem(BUILD_KEY,String(manifest.build));
+    const normalized=normalizeRecovery(recovery);
+    if(storage){
+      if(normalized&&typeof storage.setItem==='function')storage.setItem(RECOVERY_KEY,JSON.stringify(normalized));
+      else if(typeof storage.removeItem==='function')storage.removeItem(RECOVERY_KEY);
+    }
+    return{ok:true,build:manifest.build,recovery:normalized};
+  }
+
+  function verifyEntrypoint({entrypoint,build}={}){
+    const failures=[];
+    if(String(entrypoint||'')!==String(manifest.entrypoint))failures.push('WRONG_ENTRYPOINT');
+    if(String(build||'')!==String(manifest.build))failures.push('WRONG_BUILD');
+    if(storage&&typeof storage.getItem==='function'){
+      const expected=storage.getItem(BUILD_KEY);
+      if(expected&&expected!==String(manifest.build))failures.push('STALE_EXPECTED_BUILD');
+    }
+    return{ok:failures.length===0,failures};
+  }
+
+  function publishBootProof(epoch){
+    const recovery=expectedRecovery();
+    const proof={
+      schema:1,version:'V3',build:manifest.build,entrypoint:manifest.entrypoint,
+      character:epoch&&epoch.character||null,frame_id:epoch&&epoch.frame_id||null,
+      epoch:epoch&&epoch.epoch||null,at:Number(now()),
+      recovery_snapshot_id:recovery&&recovery.snapshot_id||null,
+      recovery_tree_hash:recovery&&recovery.tree_hash||null
+    };
+    root.__POGI_V3_BOOTSTRAP_PROOF=proof;
+    if(storage&&typeof storage.setItem==='function')storage.setItem(BOOT_KEY,JSON.stringify(proof));
+    return proof;
+  }
+
+  function readProof(){return root.__POGI_V3_BOOTSTRAP_PROOF||null;}
+
+  return{arm,verifyEntrypoint,publishBootProof,readProof,expectedRecovery,BUILD_KEY,BOOT_KEY,RECOVERY_KEY};
+}
+
+module.exports={createStaleCodeGuard};
+
+},{}],
+"core/safety/DeploymentSafety.js":[function(require,module,exports){
+'use strict';
+
+function clone(value){return value==null?value:JSON.parse(JSON.stringify(value));}
+
+function createDeploymentSafety({affectedCharacters=['Rentaro','Hibari','Souji','Harutora'],fighters=['Hibari','Souji','Harutora'],now=Date.now}={}){
+  const state={
+    phase:'PREPARE',
+    affected:affectedCharacters.slice(),
+    characters:Object.fromEntries(affectedCharacters.map(name=>[name,{safe:false,offline:false,at:null}])),
+    publish_allowed:false,
+    last_error:null,
+    updated_at:Number(now())
+  };
+
+  function recompute(){
+    state.publish_allowed=state.affected.every(name=>{
+      const row=state.characters[name];
+      return row&&row.safe===true&&row.offline===true;
+    });
+    if(state.publish_allowed&&['PREPARE','RETREATING'].includes(state.phase))state.phase='OFFLINE_SAFE';
+    state.updated_at=Number(now());
+  }
+
+  function begin(){state.phase='RETREATING';state.publish_allowed=false;state.last_error=null;state.updated_at=Number(now());return snapshot();}
+
+  function report(character,{safe,offline}={}){
+    const name=String(character||'');
+    if(!state.characters[name])return{ok:false,error:'CHARACTER_NOT_AFFECTED'};
+    state.characters[name]={safe:safe===true,offline:offline===true,at:Number(now())};
+    recompute();
+    return{ok:true,state:snapshot()};
+  }
+
+  function authorizePublish(){
+    recompute();
+    if(!state.publish_allowed)return{ok:false,error:'DEPLOYMENT_UNSAFE',state:snapshot()};
+    state.phase='UPDATE_ALLOWED';state.updated_at=Number(now());
+    return{ok:true,state:snapshot()};
+  }
+
+  function beginRestart(){
+    if(state.phase!=='UPDATE_ALLOWED')return{ok:false,error:'UPDATE_NOT_AUTHORIZED'};
+    state.phase='RESTARTING';state.publish_allowed=false;state.updated_at=Number(now());
+    return{ok:true,state:snapshot()};
+  }
+
+  function beginVerify(){state.phase='VERIFYING';state.updated_at=Number(now());return snapshot();}
+
+  function finish(result){
+    if(result&&result.ok){state.phase='PASS';state.last_error=null;}
+    else{state.phase='FAIL';state.last_error='RECOVERY_VERIFICATION_FAILED';}
+    state.updated_at=Number(now());
+    return snapshot();
+  }
+
+  function snapshot(){return clone(state);}
+  return{begin,report,authorizePublish,beginRestart,beginVerify,finish,snapshot,fighters:fighters.slice()};
+}
+
+module.exports={createDeploymentSafety};
+
+},{}],
+"core/scheduler/RoleDecider.js":[function(require,module,exports){
+'use strict';
+
+function createRoleDecider({character,role,services={}}={}){
+  const who=String(character||''),kind=String(role||'');
+
+  return async function decide(ctx={}){
+    const worldBossService=services.WorldBoss;
+    const bossGate=worldBossService&&typeof worldBossService.shouldActivate==='function'
+      ?worldBossService.shouldActivate(ctx)
+      :null;
+
+    if(ctx.emergency===true)return{state:'EMERGENCY',reason:'EMERGENCY'};
+    if(ctx.retreat===true)return{state:'RETREAT',reason:'RETREAT'};
+    if(ctx.recovery===true)return{state:'RECOVERY',reason:'RECOVERY'};
+    if(ctx.pvpDefense===true)return{state:'PVP_DEFENSE',reason:'PVP_DEFENSE'};
+    const bossActive=ctx.worldBoss===true||(ctx.worldBoss&&typeof ctx.worldBoss==='object')||
+      (bossGate&&bossGate.active===true);
+    if(bossActive){
+      if(['WARRIOR','PRIEST'].includes(kind)){
+        const mission=bossGate&&bossGate.mission||null;
+        const called=ctx.bossHelpRequested===true||
+          Array.isArray(mission&&mission.help_requested_for)&&mission.help_requested_for.includes(who);
+        if(!called)return{state:'FARM',reason:'BOSS_MAGE_ONLY_UNTIL_CALLED',character:who,detail:bossGate||null};
+      }
+      return{state:'WORLD_BOSS',reason:bossGate&&bossGate.active===true?'SHARED_BOSS_MISSION':'WORLD_BOSS',detail:bossGate||null};
+    }
+    if(ctx.event===true)return{state:'EVENT',reason:'EVENT'};
+
+    if(kind==='MERCHANT'){
+      const controller=services.MerchantController;
+      if(controller&&typeof controller.choose==='function'){
+        const result=await controller.choose(ctx);
+        if(result&&result.selected)return{state:result.selected.state,reason:result.selected.reason,detail:result};
+      }
+      return{state:'IDLE',reason:'MERCHANT_NO_CONTROLLER'};
+    }
+
+    if(['MAGE','WARRIOR','PRIEST'].includes(kind)){
+      return{state:'FARM',reason:'DEFAULT_FIGHTER_FARM',character:who};
+    }
+
+    return{state:'IDLE',reason:'UNKNOWN_ROLE'};
+  };
+}
+
+module.exports={createRoleDecider};
+
+},{}],
+"core/scheduler/RuntimeScheduler.js":[function(require,module,exports){
+'use strict';
+
+const {canPreempt}=require('../../states/StateRegistry');
+
+function clone(v){return v==null?v:JSON.parse(JSON.stringify(v));}
+
+function createRuntimeScheduler({
+  coordinator,
+  decide,
+  alertManager=null,
+  tickGate=null,
+  onTickGate=null,
+  now=Date.now,
+  intervalMs=500,
+  setIntervalFn=setInterval,
+  clearIntervalFn=clearInterval
+}={}){
+  if(!coordinator||typeof coordinator.tick!=='function'||typeof coordinator.request!=='function')throw new Error('RUNTIME_SCHEDULER_COORDINATOR_REQUIRED');
+  if(typeof decide!=='function')throw new Error('RUNTIME_SCHEDULER_DECIDER_REQUIRED');
+
+  let timer=null,running=false,ticking=false,tickCount=0,lastDecision=null,lastError=null;
+
+  async function alert(event,detail){
+    if(!alertManager||typeof alertManager.publish!=='function')return null;
+    return alertManager.publish({
+      id:'v3-scheduler:'+event+':'+String(Number(now())),
+      kind:'V3_RUNTIME_SCHEDULER',
+      event,
+      severity:'error',
+      title:'V3 scheduler '+event,
+      body:String(detail||event),
+      requires_action:true,
+      at:Number(now())
+    });
+  }
+
+  async function tick(ctx={}){
+    if(ticking)return{ok:false,error:'SCHEDULER_TICK_BUSY'};
+    ticking=true;
+    try{
+      tickCount++;
+      // The supervised P1 gate is evaluated before role decisions, state
+      // transitions, or handler ticks. A held tick has NO game side effects.
+      if(tickGate){
+        let admission;
+        try{admission=await tickGate(ctx);}
+        catch(error){
+          const reason='P1_TICK_GATE_CHECK_FAILED';
+          if(typeof onTickGate==='function')onTickGate({allow:false,reason});
+          lastDecision={state:'HOLD',reason};
+          lastError=reason;
+          return{ok:true,held:true,reason,progress:false,tick:tickCount};
+        }
+        if(typeof onTickGate==='function')onTickGate({
+          allow:admission?.allow===true,
+          reason:admission?.allow===true?null:String(admission?.reason||'TICK_GATE_DENIED')
+        });
+        if(!admission||admission.allow!==true){
+          lastDecision={state:'HOLD',reason:String(admission?.reason||'TICK_GATE_DENIED')};
+          lastError=null;
+          return{ok:true,held:true,reason:lastDecision.reason,progress:false,tick:tickCount};
+        }
+      }
+      const before=coordinator.status();
+      if(before.paused===true){
+        const pausedResult=await coordinator.tick(ctx);
+        lastError=null;
+        return{ok:true,decision:null,state_result:pausedResult,tick:tickCount,paused:true};
+      }
+
+      const decision=await decide(ctx);
+      lastDecision=clone(decision||null);
+
+      if(decision&&decision.state){
+        const desired=String(decision.state);
+        const current=coordinator.status().current;
+        if(current!==desired){
+          if(current==='IDLE'||canPreempt(current,desired)){
+            const requested=await coordinator.request(desired,{reason:String(decision.reason||'SCHEDULER')});
+            if(!requested.ok&&requested.error!=='STATE_PRIORITY_BLOCKED'){
+              lastError=requested.error;
+              await alert('STATE_REQUEST_FAILED',requested.error+': '+desired);
+              return{ok:false,error:requested.error,decision:clone(decision)};
+            }
+          }
+        }
+      }
+
+      const result=await coordinator.tick(ctx);
+      if(result&&result.ok===false){
+        lastError=result.error||'STATE_TICK_FAILED';
+        await alert('STATE_TICK_FAILED',lastError);
+        return{ok:false,error:lastError,decision:clone(decision),state_result:result};
+      }
+      lastError=null;
+      return{ok:true,decision:clone(decision),state_result:result,tick:tickCount};
+    }catch(error){
+      lastError=String(error&&error.message||error);
+      await alert('SCHEDULER_ERROR',lastError);
+      return{ok:false,error:lastError};
+    }finally{ticking=false;}
+  }
+
+  function start(){
+    if(running)return{ok:true,already_running:true};
+    running=true;
+    timer=setIntervalFn(()=>{void tick();},Math.max(100,Number(intervalMs)||500));
+    return{ok:true,interval_ms:Math.max(100,Number(intervalMs)||500)};
+  }
+  function stop(){if(timer)clearIntervalFn(timer);timer=null;running=false;return{ok:true};}
+  function status(){return{running,tick_count:tickCount,last_decision:clone(lastDecision),last_error:lastError};}
+  return{tick,start,stop,status};
+}
+
+module.exports={createRuntimeScheduler};
+
+},{"../../states/StateRegistry":"states/StateRegistry.js"}],
+"core/state/StateCoordinator.js":[function(require,module,exports){
+'use strict';
+
+const {getState,isMainState,canPreempt}=require('../../states/StateRegistry');
+
+function clone(v){return v==null?v:JSON.parse(JSON.stringify(v));}
+
+function createStateCoordinator({stateEngine,onProgress=null,now=Date.now}={}){
+  if(!stateEngine||typeof stateEngine.transitionMain!=='function'||typeof stateEngine.getStatus!=='function'){
+    throw new Error('STATE_COORDINATOR_ENGINE_REQUIRED');
+  }
+  const handlers=new Map();
+  const stack=[];
+  let paused=false;
+  let pauseReason=null;
+  let pausePending=null;
+
+  function register(name,handler={}){
+    const key=String(name||'');
+    if(!getState(key))throw new Error('STATE_NOT_REGISTERED:'+key);
+    if(!isMainState(key))throw new Error('STATE_NOT_MAIN:'+key);
+    if(handlers.has(key))throw new Error('STATE_HANDLER_DUPLICATE:'+key);
+    handlers.set(key,handler||{});
+    return api;
+  }
+
+  function current(){return String(stateEngine.getStatus().main||'IDLE');}
+  function handler(name){return handlers.get(String(name||''))||null;}
+
+  async function call(name,hook,...args){
+    const h=handler(name);
+    if(!h||typeof h[hook]!=='function')return null;
+    return h[hook](...args);
+  }
+
+  async function snapshotHandler(name){
+    const value=await call(name,'snapshot');
+    return clone(value);
+  }
+
+  async function request(next,{reason='REQUESTED',allowSame=true}={}){
+    const target=String(next||'');
+    if(!getState(target))return{ok:false,error:'STATE_UNKNOWN',state:target};
+    if(!isMainState(target))return{ok:false,error:'STATE_NOT_MAIN',state:target};
+    if(paused)return{ok:false,error:'STATE_COORDINATOR_PAUSED'};
+    const from=current();
+    if(from===target)return allowSame?{ok:true,no_change:true,state:from}:{ok:false,error:'STATE_ALREADY_ACTIVE'};
+    if(target!=='IDLE'&&!handler(target))return{ok:false,error:'STATE_HANDLER_UNAVAILABLE',state:target};
+
+    if(from!=='IDLE'&&!canPreempt(from,target)){
+      return{ok:false,error:'STATE_PRIORITY_BLOCKED',current:from,requested:target};
+    }
+
+    if(from!=='IDLE'){
+      const saved=await snapshotHandler(from);
+      await call(from,'pause',{reason:'PREEMPTED_BY_'+target});
+      stack.push({state:from,reason:stateEngine.getStatus().mainReason,snapshot:saved,preempted_at:Number(now())});
+    }
+
+    const moved=stateEngine.transitionMain(target,{reason,resetSides:false});
+    if(!moved.ok)return moved;
+    await call(target,'start',{reason,from});
+    return{ok:true,from,to:target,stack_depth:stack.length};
+  }
+
+  async function replace(next,{reason='REPLACED'}={}){
+    const target=String(next||'');
+    if(!getState(target))return{ok:false,error:'STATE_UNKNOWN',state:target};
+    if(!isMainState(target))return{ok:false,error:'STATE_NOT_MAIN',state:target};
+    if(paused)return{ok:false,error:'STATE_COORDINATOR_PAUSED'};
+    if(target!=='IDLE'&&!handler(target))return{ok:false,error:'STATE_HANDLER_UNAVAILABLE',state:target};
+    const from=current();
+    if(from===target)return{ok:true,no_change:true,state:from};
+    if(from!=='IDLE'&&!canPreempt(from,target)){
+      return{ok:false,error:'STATE_PRIORITY_BLOCKED',current:from,requested:target};
+    }
+    if(from!=='IDLE')await call(from,'stop',{reason:'REPLACED_BY_'+target});
+    stack.length=0;
+    const moved=stateEngine.transitionMain(target,{reason,resetSides:false});
+    if(!moved.ok)return moved;
+    if(target!=='IDLE')await call(target,'start',{reason,from});
+    return{ok:true,from,to:target};
+  }
+
+  async function applyPendingPause(completedState){
+    if(!pausePending||String(pausePending.wait_for_state||'')!==String(completedState||''))return null;
+    const pending=clone(pausePending);
+    pausePending=null;
+    const result=await pauseAll(pending.reason||'GRACEFUL_PAUSE');
+    return{...result,graceful:true,completed_state:String(completedState||''),requested_at:pending.requested_at};
+  }
+
+  async function complete(name,{reason='COMPLETE'}={}){
+    const key=String(name||'');
+    const active=current();
+    if(active!==key)return{ok:false,error:'STATE_NOT_ACTIVE',active,requested:key};
+    await call(active,'stop',{reason});
+    const previous=stack.pop()||null;
+    let resumedState='IDLE';
+    if(!previous){
+      stateEngine.transitionMain('IDLE',{reason:'RESUME_FALLBACK_IDLE',resetSides:false});
+    }else{
+      stateEngine.transitionMain(previous.state,{reason:'RESUME_AFTER_'+active,resetSides:false});
+      if(previous.snapshot!=null)await call(previous.state,'restore',clone(previous.snapshot),{reason:'RESUME_AFTER_'+active});
+      const resumed=await call(previous.state,'resume',{reason:'RESUME_AFTER_'+active});
+      if(resumed==null)await call(previous.state,'start',{reason:'RESUME_AFTER_'+active});
+      resumedState=previous.state;
+    }
+    const gracefulPause=await applyPendingPause(active);
+    return{
+      ok:true,
+      completed:active,
+      resumed:resumedState,
+      stack_depth:stack.length,
+      graceful_pause:gracefulPause
+    };
+  }
+
+  async function tick(ctx={}){
+    if(paused)return{ok:true,progress:false,reason:'COORDINATOR_PAUSED'};
+    const active=current();
+    if(active==='IDLE')return{ok:true,progress:false,state:'IDLE'};
+    const h=handler(active);
+    if(!h)return{ok:false,error:'STATE_HANDLER_UNAVAILABLE',state:active};
+
+    let result;
+    if(typeof h.tick==='function')result=await h.tick(ctx);
+    else if(typeof h.run==='function')result=await h.run(ctx);
+    else if(typeof h.health==='function'){
+      const health=await h.health(ctx);
+      if(!health||health.ok===false)return{ok:false,error:health&&health.error||'STATE_HEALTH_FAILED',state:active,health};
+      result={ok:true,progress:true,kind:active+'_HEALTH_PROOF',state:active,health};
+    }else return{ok:true,progr
