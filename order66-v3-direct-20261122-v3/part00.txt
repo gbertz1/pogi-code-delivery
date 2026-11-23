@@ -1,0 +1,1435 @@
+/* ORDER66 V3 DIRECT | source 9494ba76af3d865ad1c7de4170f7f244e8bb86db | 103 native modules, no Bridge */
+(function(root){"use strict";var defs={
+"adapters/adventureland/LiveAdapters.js":[function(require,module,exports){
+'use strict';
+
+const {createShopAdapter}=require('./ShopAdapter');
+
+function clone(value){return value==null?value:JSON.parse(JSON.stringify(value));}
+
+function fn(root,name){
+  return root&&typeof root[name]==='function'?root[name].bind(root):null;
+}
+
+function character(root){
+  return root&&root.character&&typeof root.character==='object'?root.character:null;
+}
+
+function resolveEntity(root,id){
+  const key=String(id||'');
+  if(!key)return null;
+  try{
+    const getter=fn(root,'get_entity');
+    if(getter){
+      const row=getter(key);
+      if(row)return row;
+    }
+  }catch{}
+  try{
+    const player=fn(root,'get_player');
+    if(player){
+      const row=player(key);
+      if(row)return row;
+    }
+  }catch{}
+  try{
+    if(root&&root.parent&&root.parent.entities&&root.parent.entities[key])return root.parent.entities[key];
+  }catch{}
+  try{
+    if(root&&root.entities&&root.entities[key])return root.entities[key];
+  }catch{}
+  return null;
+}
+
+function makeMovement(root){
+  return{
+    async town(){
+      const use=fn(root,'use_skill');
+      if(!use)return{ok:false,error:'TOWN_SKILL_UNAVAILABLE'};
+      try{const result=await use('town');return{ok:!(result&&result.failed===true||result&&result.ok===false),result:clone(result)};}
+      catch(error){return{ok:false,error:'TOWN_CAST_FAILED',detail:String(error&&error.message||error)};}
+    },
+    async transport(target){
+      const use=fn(root,'transport');
+      if(!use)return{ok:false,error:'TRANSPORT_HOOK_UNAVAILABLE'};
+      if(!target||typeof target.to!=='string'||!Number.isInteger(target.spawn))
+        return{ok:false,error:'TRANSPORT_INVALID'};
+      try{const result=await use(target.to,target.spawn);return{ok:!(result&&result.failed===true||result&&result.ok===false),result:clone(result)};}
+      catch(error){return{ok:false,error:'TRANSPORT_FAILED',detail:String(error&&error.message||error)};}
+    },
+    canMoveTo(target){
+      const c=character(root),checker=fn(root,'can_move_to');
+      if(!c||!checker||!target||target.map&&target.map!==c.map||
+        !Number.isFinite(target.x)||!Number.isFinite(target.y))return false;
+      try{return checker(target.x,target.y)===true;}catch{return false;}
+    },
+    async move(target){
+      const move=fn(root,'move');
+      if(!move)return{ok:false,error:'MOVE_UNAVAILABLE'};
+      if(!target||!Number.isFinite(Number(target.x))||!Number.isFinite(Number(target.y))||
+         (target.map&&String(target.map)!==String(character(root)&&character(root).map||''))){
+        return{ok:false,error:'MOVE_TARGET_INVALID'};
+      }
+      const result=await move(Number(target.x),Number(target.y));
+      return{ok:!(result&&result.failed===true),result:clone(result)};
+    },
+    async smartMove(){
+      // Normal V3 runtime has NO SmartMove permission, including recovery.
+      // One-shot coordinate capture is isolated in Order66RentaroNavigationTeacher.
+      return{ok:false,error:'SMART_MOVE_BANNED_NORMAL_RUNTIME'};
+    }
+  };
+}
+
+function makeCombat(root){
+  return{
+    async attack(id){
+      const attack=fn(root,'attack');
+      if(!attack)return{ok:false,error:'ATTACK_UNAVAILABLE'};
+      const entity=resolveEntity(root,id);
+      if(!entity)return{ok:false,error:'TARGET_NOT_VISIBLE',target:String(id||'')};
+      try{
+        const result=await attack(entity);
+        // Native Adventure Land attack may return a circular event object.
+        // Keep only success primitives, never JSON-clone a game object.
+        const ok=!(result&&result.failed===true||result&&result.ok===false);
+        return{ok,result:{success:ok}};
+      }catch(error){
+        // Cooldown, range, and unavailable-target rejections are ordinary
+        // native combat conditions, not a thrown scheduler failure.
+        return{ok:false,error:'ATTACK_NATIVE_REJECTED',
+          detail:String(error?.reason||error?.message||error)};
+      }
+    }
+  };
+}
+
+function makeFighter(root){
+  function skillReady(name){
+    const cooldown=fn(root,'is_on_cooldown');
+    if(!cooldown)return null;
+    try{return cooldown(String(name||''))!==true;}catch{return null;}
+  }
+  function canAttack(id){
+    const checker=fn(root,'can_attack');
+    const entity=resolveEntity(root,id);
+    if(!entity)return false;
+    if(checker){
+      try{return checker(entity)===true;}catch{return false;}
+    }
+    const ready=skillReady('attack');
+    return ready!==false;
+  }
+  return{
+    entitiesSnapshot(){
+      // Game entities are live PIXI/event objects and often circular. Never
+      // JSON-clone the entire renderer object: that discards all monsters
+      // and silently starves V3 targeting. Copy only combat fields.
+      const out={},rows=root&&root.parent&&root.parent.entities||root&&root.entities||{};
+      const self=character(root);
+      const sx=Number(self?.real_x??self?.x),sy=Number(self?.real_y??self?.y);
+      for(const [id,row] of Object.entries(rows||{})){
+        if(!row||typeof row!=='object')continue;
+        const x=Number(row.real_x??row.x),y=Number(row.real_y??row.y);
+        const dist=Number.isFinite(sx)&&Number.isFinite(sy)&&
+          Number.isFinite(x)&&Number.isFinite(y)?Math.hypot(sx-x,sy-y):null;
+        out[String(id)]={
+          id:String(row.id||id),name:row.name==null?null:String(row.name),
+          type:String(row.type||''),mtype:String(row.mtype||''),
+          map:row.map==null?String(self?.map||''):String(row.map),
+          x:Number.isFinite(x)?x:null,y:Number.isFinite(y)?y:null,
+          real_x:Number.isFinite(x)?x:null,real_y:Number.isFinite(y)?y:null,
+          distance:dist,
+          hp:Number(row.hp||0),max_hp:Number(row.max_hp||0),
+          target:row.target==null?null:String(row.target),
+          dead:row.dead===true,rip:row.rip===true,
+          visible:row.visible!==false,cooperative:row.cooperative===true
+        };
+      }
+      return out;
+    },
+    partySnapshot(){
+      const out={};
+      const current=character(root);
+      const getter=fn(root,'get_party');
+      let rows={};
+      try{rows=getter?getter()||{}:(root&&root.parent&&root.parent.party)||{};}catch{rows={};}
+      for(const [name,cached] of Object.entries(rows||{})){
+        const visible=resolveEntity(root,name);
+        const row=visible||cached||{};
+        // get_party provides HP for off-screen members, even those on
+        // another map. Preserve it for Souji's group-heal decisions but
+        // NEVER mark an unseen member physically present for farm admission.
+        const rosterHpValid=!!cached&&Number.isFinite(Number(cached.hp))&&
+          Number.isFinite(Number(cached.max_hp))&&Number(cached.max_hp)>0;
+        out[String(name)]={
+          online:!!visible,
+          rosterOnline:!!cached&&cached.online!==false,
+          healthFromPartyRoster:!visible&&rosterHpValid,
+          dead:row.dead===true,
+          rip:row.rip===true,
+          map:(!visible&&!rosterHpValid)?null:String(row.map||current&&current.map||''),
+          instance:(!visible&&!rosterHpValid)?null:
+            String(row.in??row.instance??(current&&current.in)??''),
+          x:Number.isFinite(Number(row.real_x))?Number(row.real_x):(Number.isFinite(Number(row.x))?Number(row.x):null),
+          y:Number.isFinite(Number(row.real_y))?Number(row.real_y):(Number.isFinite(Number(row.y))?Number(row.y):null),
+          hp:Number(row.hp||0),
+          max_hp:Number(row.max_hp||0),
+          mp:Number(row.mp||0),
+          max_mp:Number(row.max_mp||0),
+          target:row.target==null?null:String(row.target)
+        };
+      }
+      if(current&&current.name){
+        out[String(current.name)]={
+          online:true,dead:current.dead===true,rip:current.rip===true,
+          map:current.map==null?null:String(current.map),
+          instance:current.in==null?(current.instance==null?null:String(current.instance)):String(current.in),
+          x:Number.isFinite(Number(current.real_x))?Number(current.real_x):(Number.isFinite(Number(current.x))?Number(current.x):null),
+          y:Number.isFinite(Number(current.real_y))?Number(current.real_y):(Number.isFinite(Number(current.y))?Number(current.y):null),
+          hp:Number(current.hp||0),max_hp:Number(current.max_hp||0),
+          mp:Number(current.mp||0),max_mp:Number(current.max_mp||0),
+          target:current.target==null?null:String(current.target)
+        };
+      }
+      return out;
+    },
+    snapshot(targetId=null){
+      const c=character(root);
+      if(!c)return{ok:false,error:'CHARACTER_UNAVAILABLE'};
+      const target=targetId==null?null:resolveEntity(root,targetId);
+      let targetDistance=null;
+      if(target){
+        try{
+          const distanceFn=fn(root,'distance');
+          if(distanceFn)targetDistance=Number(distanceFn(c,target));
+        }catch{}
+        if(!Number.isFinite(targetDistance)){
+          const cx=Number(c.real_x!==undefined?c.real_x:c.x),cy=Number(c.real_y!==undefined?c.real_y:c.y);
+          const tx=Number(target.real_x!==undefined?target.real_x:target.x),ty=Number(target.real_y!==undefined?target.real_y:target.y);
+          if([cx,cy,tx,ty].every(Number.isFinite))targetDistance=Math.hypot(cx-tx,cy-ty);
+        }
+      }
+      return{
+        ok:true,
+        name:String(c.name||''),
+        mp:Number(c.mp||0),
+        maxMp:Number(c.max_mp||0),
+        basicAttackMp:Number(c.mp_cost||0),
+        hp:Number(c.hp||0),
+        maxHp:Number(c.max_hp||0),
+        hpRatio:Number(c.max_hp||0)>0?Number(c.hp||0)/Number(c.max_hp):0,
+        level:Number(c.level||0),
+        attackRange:Number.isFinite(Number(c.range))&&Number(c.range)>0?Number(c.range):null,
+        sugarRushActive:!!(c.s&&c.s.sugarrush),
+        equipment:clone(c.slots||{}),
+        cleaveLoadoutReady:!!(
+          c.slots&&c.slots.mainhand&&c.slots.mainhand.name==='bataxe'&&!c.slots.offhand
+        ),
+        sugarPrepLoadoutReady:!!(
+          c.slots&&c.slots.mainhand&&c.slots.mainhand.name==='vhammer'&&
+          c.slots.offhand&&c.slots.offhand.name==='ololipop'&&Number(c.slots.offhand.level||0)>=9
+        ),
+        sugarBurnLoadoutReady:!!(
+          c.slots&&c.slots.mainhand&&c.slots.mainhand.name==='vhammer'&&
+          c.slots.offhand&&c.slots.offhand.name==='vhammer'
+        ),
+        attackReady:target?canAttack(targetId):(skillReady('attack')===true),
+        targetInAttackRange:target?canAttack(targetId):false,
+        cleaveCooldownReady:skillReady('cleave')===true,
+        stompCooldownReady:skillReady('stomp')===true,
+        tauntCooldownReady:skillReady('taunt')===true,
+        hardShellCooldownReady:skillReady('hardshell')===true,
+        agitateCooldownReady:skillReady('agitate')===true,
+        target:target?clone({
+          id:target.id||targetId,
+          mtype:target.mtype||null,
+          target:target.target||null,
+          distance:Number.isFinite(targetDistance)?targetDistance:null,
+          map:target.map==null?null:String(target.map),
+          instance:target.in==null?(target.instance==null?null:String(target.instance)):String(target.in),
+          x:target.x,
+          y:target.y
+        }):null
+      };
+    },
+    async use(name,targetId=null){
+      const use=fn(root,'use_skill');
+      if(!use)return{ok:false,error:'USE_SKILL_UNAVAILABLE'};
+      const skill=String(name||'');
+      if(!skill)return{ok:false,error:'SKILL_REQUIRED'};
+      const target=targetId==null?null:resolveEntity(root,targetId);
+      try{
+        const result=targetId==null?await use(skill):await use(skill,target||String(targetId));
+        return{ok:!(result&&result.failed===true),result:clone(result)};
+      }catch(error){
+        return{ok:false,error:'USE_SKILL_FAILED',detail:String(error&&error.message||error)};
+      }
+    },
+    ready:skillReady,
+    healerHeartbeatRunning(){
+      const h=root&&root.__POGI_V3_PRIEST_HEAL;
+      try{return !!h&&typeof h.status==='function'&&h.status().running===true;}catch{return false;}
+    },
+    canAttack
+  };
+}
+
+function makeInventory(root){
+  return{
+    async snapshot(){
+      const c=character(root);
+      if(!c||!Array.isArray(c.items))throw new Error('CHARACTER_ITEMS_UNAVAILABLE');
+      return c.items.map(clone);
+    }
+  };
+}
+
+function makeBank(root){
+  return{
+    async snapshot(){
+      const c=character(root);
+      if(!c||!c.bank||typeof c.bank!=='object')throw new Error('BANK_NOT_OPEN');
+      return clone(c.bank);
+    },
+    async retrieve(pack,bankSlot,inventorySlot){
+      const retrieve=fn(root,'bank_retrieve');
+      if(!retrieve)return{ok:false,error:'BANK_RETRIEVE_UNAVAILABLE'};
+      const result=await retrieve(String(pack),Number(bankSlot),Number(inventorySlot));
+      return{ok:!(result&&result.failed===true),result:clone(result)};
+    },
+    async store(inventorySlot,pack,bankSlot){
+      const store=fn(root,'bank_store');
+      if(!store)return{ok:false,error:'BANK_STORE_UNAVAILABLE'};
+      const result=await store(Number(inventorySlot),String(pack),Number(bankSlot));
+      return{ok:!(result&&result.failed===true),result:clone(result)};
+    },
+    itemMeta(name){
+      try{
+        const row=root&&root.G&&root.G.items&&root.G.items[String(name||'')];
+        return row&&typeof row==='object'?clone(row):null;
+      }catch{return null;}
+    },
+    currentMap(){
+      const c=character(root);
+      return c&&c.map?String(c.map):null;
+    }
+  };
+}
+
+function makeGearProduction(root){
+  function ready(){
+    return !!(
+      fn(root,'buy')&&
+      fn(root,'upgrade')&&
+      fn(root,'compound')&&
+      fn(root,'item_grade')
+    );
+  }
+  return{
+    ready,
+    currentMap(){
+      const c=character(root);
+      return c&&c.map?String(c.map):null;
+    },
+    queueStatus(){
+      const c=character(root),q=c&&c.q||{};
+      const upgrade=!!q.upgrade,compound=!!q.compound,exchange=!!q.exchange;
+      return{busy:upgrade||compound||exchange,upgrade,compound,exchange};
+    },
+    itemGrade(item){
+      const grade=fn(root,'item_grade');
+      if(!grade)return null;
+      try{
+        const value=Number(grade(clone(item)));
+        return Number.isFinite(value)?value:null;
+      }catch{return null;}
+    },
+    async buy(name,quantity=1){
+      const buy=fn(root,'buy');
+      if(!buy)return{ok:false,error:'BUY_UNAVAILABLE'};
+      try{
+        const result=await buy(String(name),Number(quantity)||1);
+        return{ok:!(result&&result.failed===true),result:clone(result)};
+      }catch(error){
+        return{ok:false,error:'BUY_FAILED',detail:String(error&&error.message||error)};
+      }
+    },
+    async upgrade(itemSlot,scrollSlot,offeringSlot=null){
+      const upgrade=fn(root,'upgrade');
+      if(!upgrade)return{ok:false,error:'UPGRADE_UNAVAILABLE'};
+      try{
+        const result=await upgrade(Number(itemSlot),Number(scrollSlot),offeringSlot==null?null:Number(offeringSlot));
+        return{ok:!(result&&result.failed===true),result:clone(result)};
+      }catch(error){
+        return{ok:false,error:'UPGRADE_FAILED',detail:String(error&&error.message||error)};
+      }
+    },
+    async compound(itemSlots,scrollSlot,offeringSlot=null){
+      const compound=fn(root,'compound');
+      if(!compound)return{ok:false,error:'COMPOUND_UNAVAILABLE'};
+      const slots=(Array.isArray(itemSlots)?itemSlots:[]).map(Number);
+      if(slots.length!==3||slots.some(x=>!Number.isInteger(x)||x<0))return{ok:false,error:'COMPOUND_SLOTS_INVALID'};
+      try{
+        const result=await compound(slots[0],slots[1],slots[2],Number(scrollSlot),offeringSlot==null?null:Number(offeringSlot));
+        return{ok:!(result&&result.failed===true),result:clone(result)};
+      }catch(error){
+        return{ok:false,error:'COMPOUND_FAILED',detail:String(error&&error.message||error)};
+      }
+    }
+  };
+}
+
+function makeGear(root){
+  return{
+    async inventory(){
+      const c=character(root);
+      if(!c||!Array.isArray(c.items))throw new Error('CHARACTER_ITEMS_UNAVAILABLE');
+      return c.items.map(clone);
+    },
+    async equipment(){
+      const c=character(root);
+      if(!c||!c.slots||typeof c.slots!=='object')throw new Error('CHARACTER_SLOTS_UNAVAILABLE');
+      return clone(c.slots);
+    },
+    async equip(slot,equipmentSlot=null){
+      const equip=fn(root,'equip');
+      if(!equip)return{ok:false,error:'EQUIP_UNAVAILABLE'};
+      const index=Number(slot);
+      if(!Number.isInteger(index)||index<0)return{ok:false,error:'EQUIP_SLOT_INVALID'};
+      const result=equipmentSlot?await equip(index,String(equipmentSlot)):await equip(index);
+      return{ok:!(result&&result.failed===true),result:clone(result)};
+    },
+    async unequip(equipmentSlot){
+      const unequip=fn(root,'unequip');
+      if(!unequip)return{ok:false,error:'UNEQUIP_UNAVAILABLE'};
+      const slot=String(equipmentSlot||'');
+      if(!slot)return{ok:false,error:'UNEQUIP_SLOT_INVALID'};
+      const result=await unequip(slot);
+      return{ok:!(result&&result.failed===true),result:clone(result)};
+    }
+  };
+}
+
+function standState(root){
+  const c=character(root);
+  return !!(c&&c.stand);
+}
+
+async function toggleStand(root,wantOpen){
+  if(standState(root)===wantOpen)return{ok:true,already:true};
+  const direct=wantOpen?(fn(root,'open_stand')||fn(root,'open_merchant')):(fn(root,'close_stand')||fn(root,'close_merchant'));
+  if(direct){
+    const result=await direct();
+    return{ok:!(result&&result.failed===true),result:clone(result)};
+  }
+  const toggle=fn(root,'open_close_stand');
+  if(!toggle)return{ok:false,error:wantOpen?'STAND_OPEN_UNAVAILABLE':'STAND_CLOSE_UNAVAILABLE'};
+  const result=await toggle();
+  return{ok:!(result&&result.failed===true),result:clone(result)};
+}
+
+function makeStand(root){
+  return{
+    async isOpen(){return standState(root);},
+    async open(){return toggleStand(root,true);},
+    async close(){return toggleStand(root,false);}
+  };
+}
+
+function auditLiveAdapters(root){
+  const c=character(root);
+  const hooks={
+    character:!!c,
+    items:!!(c&&Array.isArray(c.items)),
+    slots:!!(c&&c.slots&&typeof c.slots==='object'),
+    move:!!fn(root,'move'),
+    attack:!!fn(root,'attack'),
+    use_skill:!!fn(root,'use_skill'),
+    equip:!!fn(root,'equip'),
+    unequip:!!fn(root,'unequip'),
+    stand_control:!!(
+      fn(root,'open_close_stand')||
+      (fn(root,'open_stand')&&fn(root,'close_stand'))||
+      (fn(root,'open_merchant')&&fn(root,'close_merchant'))
+    )
+  };
+  const missing=Object.entries(hooks).filter(([,ok])=>!ok).map(([name])=>name);
+  return{ok:missing.length===0,hooks,missing};
+}
+
+function createAdventureLandLiveAdapters(root=(typeof globalThis!=='undefined'?globalThis:{})){
+  const audit=auditLiveAdapters(root);
+  return{
+    audit,
+    movement:makeMovement(root),
+    combat:makeCombat(root),
+    inventory:makeInventory(root),
+    fighter:makeFighter(root),
+    bank:makeBank(root),
+    gear:makeGear(root),
+    gearProduction:makeGearProduction(root),
+    stand:makeStand(root),
+    shop:createShopAdapter(root,{publicOrigin:root&&root.__POGI_PUBLIC_ORIGIN||null})
+  };
+}
+
+module.exports={
+  createAdventureLandLiveAdapters,
+  auditLiveAdapters,
+  resolveEntity
+};
+
+},{"./ShopAdapter":"adapters/adventureland/ShopAdapter.js"}],
+"adapters/adventureland/ShopAdapter.js":[function(require,module,exports){
+'use strict';
+
+const clone=v=>v==null?v:JSON.parse(JSON.stringify(v));
+function fn(root,name){return root&&typeof root[name]==='function'?root[name].bind(root):null;}
+function character(root){return root&&root.character&&typeof root.character==='object'?root.character:null;}
+function resultOk(result){return !(result&&result.failed===true);}
+function merchantSnapshot(root){
+  const rows=[];const entities=(root&&root.parent&&root.parent.entities)||(root&&root.entities)||{};
+  for(const entity of Object.values(entities||{})){
+    if(!entity||!entity.slots||!entity.id)continue;
+    const hasTrade=Object.keys(entity.slots).some(x=>/^trade\d+$/i.test(x));
+    if(hasTrade){
+      // Native merchants are circular PIXI event actors; never serialize
+      // their renderer. Shop only needs the merchant ID and trade slots.
+      const slots={};
+      for(const [key,item] of Object.entries(entity.slots)){
+        if(!/^trade\\d+$/i.test(key)||!item||typeof item!=='object')continue;
+        slots[key]={
+          name:item.name==null?null:String(item.name),
+          level:Number(item.level||0),q:Number(item.q||1),
+          price:Number(item.price||0),p:item.p==null?null:String(item.p)
+        };
+      }
+      rows.push({id:String(entity.id),name:String(entity.name||entity.id),
+        map:String(entity.map||''),x:Number(entity.real_x??entity.x??0),
+        y:Number(entity.real_y??entity.y??0),slots});
+    }
+  }
+  return rows;
+}
+function origin(root,explicit){
+  if(explicit)return String(explicit).replace(/\/$/,'');
+  if(root&&root.__POGI_PUBLIC_ORIGIN)return String(root.__POGI_PUBLIC_ORIGIN).replace(/\/$/,'');
+  return '';
+}
+function createShopAdapter(root=(typeof globalThis!=='undefined'?globalThis:{}),{publicOrigin=null}={}){
+  return{
+    standSlots(){const c=character(root);return clone(c&&c.slots||{});},
+    visibleMerchants(){return merchantSnapshot(root);},
+    visibleMerchant(id){const key=String(id||'');return merchantSnapshot(root).find(x=>String(x.id||x.name||'')===key)||null;},
+    async tradeOffer(inventorySlot,tradeSlot,want,quantity=1){
+      const call=fn(root,'trade_offer');if(!call)return{ok:false,error:'TRADE_OFFER_UNAVAILABLE'};
+      try{const r=await call(Number(inventorySlot),String(tradeSlot),clone(want),Math.max(1,Number(quantity)||1));return{ok:resultOk(r),result:clone(r)};}catch(error){return{ok:false,error:'TRADE_OFFER_FAILED',detail:String(error&&error.message||error)};}
+    },
+    async tradeSwap(target,tradeSlot,inventorySlot){
+      const call=fn(root,'trade_swap');if(!call)return{ok:false,error:'TRADE_SWAP_UNAVAILABLE'};
+      try{const r=await call(target,String(tradeSlot),Number(inventorySlot));return{ok:resultOk(r),result:clone(r)};}catch(error){return{ok:false,error:'TRADE_SWAP_FAILED',detail:String(error&&error.message||error)};}
+    },
+    async listSale(inventorySlot,tradeSlot,price,quantity=1){
+      const call=fn(root,'trade');if(!call)return{ok:false,error:'TRADE_LIST_UNAVAILABLE'};
+      try{const r=await call(Number(inventorySlot),String(tradeSlot),Math.max(0,Number(price)||0),Math.max(1,Number(quantity)||1));return{ok:resultOk(r),result:clone(r)};}catch(error){return{ok:false,error:'TRADE_LIST_FAILED',detail:String(error&&error.message||error)};}
+    },
+    async removeListing(tradeSlot){
+      const call=fn(root,'unequip');if(!call)return{ok:false,error:'TRADE_UNLIST_UNAVAILABLE'};
+      try{const r=await call(String(tradeSlot));return{ok:resultOk(r),result:clone(r)};}catch(error){return{ok:false,error:'TRADE_UNLIST_FAILED',detail:String(error&&error.message||error)};}
+    },
+    async readConfig(){
+      const base=origin(root,publicOrigin),fetchFn=root&&typeof root.fetch==='function'?root.fetch.bind(root):(typeof fetch==='function'?fetch:null);
+      if(!base||!fetchFn)return{ok:false,error:'SHOP_CONFIG_ENDPOINT_UNAVAILABLE'};
+      try{const r=await fetchFn(base+'/api/shop-config?t='+Date.now(),{cache:'no-store',mode:'cors'}),j=await r.json();return r.ok&&j&&j.ok?{ok:true,config:clone(j.config)}:{ok:false,error:j&&j.error||('HTTP_'+r.status)};}catch(error){return{ok:false,error:'SHOP_CONFIG_FETCH_FAILED',detail:String(error&&error.message||error)};}
+    }
+  };
+}
+module.exports={createShopAdapter,merchantSnapshot};
+
+},{}],
+"adapters/alerts/BridgeAlertSink.js":[function(require,module,exports){
+'use strict';
+
+function clone(value){
+  return value == null ? value : JSON.parse(JSON.stringify(value));
+}
+
+function createBridgeAlertSink({
+  root=(typeof globalThis!=='undefined'?globalThis:{}),
+  storage=(typeof globalThis!=='undefined'?globalThis.localStorage:null),
+  key='Pogi_V3_Alert_Outbox_v1',
+  maxRows=200,
+  hookName='__POGI_V3_ALERT_SINK'
+}={}){
+  function read(){
+    if(!storage || typeof storage.getItem!=='function') return [];
+    try{
+      const rows=JSON.parse(storage.getItem(key)||'[]');
+      return Array.isArray(rows)?rows:[];
+    }catch{return [];}
+  }
+
+  function write(rows){
+    if(!storage || typeof storage.setItem!=='function') return false;
+    storage.setItem(key,JSON.stringify(rows.slice(-Math.max(10,Number(maxRows)||200))));
+    return true;
+  }
+
+  async function tryHook(alert){
+    const hook=root&&root[hookName];
+    if(typeof hook!=='function') return {delivered:false,reason:'BRIDGE_HOOK_NOT_INSTALLED'};
+    try{
+      const result=await hook(clone(alert));
+      return {delivered:!(result&&result.ok===false),result:clone(result||{})};
+    }catch(error){
+      return {delivered:false,reason:String(error&&error.message||error)};
+    }
+  }
+
+  return {
+    name:'bridge-outbox',
+    async deliver(alert){
+      const rows=read();
+      const row={
+        id:String(alert.id),
+        created_at:Number(alert.at||Date.now()),
+        delivered_at:null,
+        attempts:0,
+        alert:clone(alert)
+      };
+      rows.push(row);
+      const queued=write(rows);
+
+      const delivery=await tryHook(alert);
+      row.attempts++;
+      if(delivery.delivered) row.delivered_at=Date.now();
+      write(rows);
+      return {ok:queued||delivery.delivered,queued,delivered:delivery.delivered,reason:delivery.reason||null};
+    },
+
+    async drain(){
+      const rows=read();
+      let delivered=0;
+      for(const row of rows){
+        if(row.delivered_at) continue;
+        const result=await tryHook(row.alert);
+        row.attempts=Number(row.attempts||0)+1;
+        if(result.delivered){
+          row.delivered_at=Date.now();
+          delivered++;
+        }
+      }
+      write(rows);
+      return {ok:true,delivered,pending:rows.filter(row=>!row.delivered_at).length};
+    },
+
+    pending(){
+      return read().filter(row=>!row.delivered_at).map(clone);
+    },
+
+    key,
+    hookName
+  };
+}
+
+module.exports={createBridgeAlertSink};
+
+},{}],
+"adapters/alerts/BrowserAlertSink.js":[function(require,module,exports){
+'use strict';
+
+function createBrowserAlertSink({root=(typeof globalThis!=='undefined'?globalThis:{}),consoleRef=console}={}){
+  return {
+    name:'browser',
+    async deliver(alert){
+      const prefix=alert.severity==='error'?'[V3 ALERT FAIL]':alert.severity==='success'?'[V3 ALERT PASS]':'[V3 ALERT]';
+      try{
+        if(consoleRef && typeof consoleRef[alert.severity==='error'?'error':'log']==='function'){
+          consoleRef[alert.severity==='error'?'error':'log'](prefix,alert.title,alert.body);
+        }
+      }catch{}
+
+      let gameLog=false;
+      try{
+        if(root && typeof root.game_log==='function'){
+          root.game_log(alert.title+': '+alert.body);
+          gameLog=true;
+        }
+      }catch{}
+
+      let notification=false;
+      let notificationReason=null;
+      try{
+        const NotificationCtor=root&&root.Notification;
+        if(NotificationCtor && NotificationCtor.permission==='granted'){
+          new NotificationCtor(alert.title,{body:alert.body,tag:alert.change_id||alert.id});
+          notification=true;
+        }else{
+          notificationReason=NotificationCtor?'PERMISSION_NOT_GRANTED':'NOT_AVAILABLE';
+        }
+      }catch(error){
+        notificationReason=String(error&&error.message||error);
+      }
+
+      return {ok:true,game_log:gameLog,browser_notification:notification,notification_reason:notificationReason};
+    }
+  };
+}
+
+module.exports={createBrowserAlertSink};
+
+},{}],
+"adapters/bridge/BridgeV3Contract.js":[function(require,module,exports){
+'use strict';
+
+const CONTRACT_VERSION=2;
+const FRAME_KEY='__POGI_BRIDGE_FRAME_ID';
+const ALERT_HOOK='__POGI_V3_ALERT_SINK';
+const RECOVERY_HOOK='__POGI_V3_RECOVERY_SINK';
+const BRIDGE_KEY='__POGI_V3_BRIDGE';
+
+function readBridge(root=(typeof globalThis!=='undefined'?globalThis:{})){
+  const bridge=root&&root[BRIDGE_KEY]&&typeof root[BRIDGE_KEY]==='object'?root[BRIDGE_KEY]:null;
+  const frameId=String((bridge&&bridge.frame_id)||root&&root[FRAME_KEY]||'');
+  const alertSink=root&&root[ALERT_HOOK];
+  const recoverySink=root&&root[RECOVERY_HOOK];
+  return{
+    contract:CONTRACT_VERSION,
+    available:!!bridge,
+    frame_id:frameId||null,
+    alert_sink:typeof alertSink==='function',
+    recovery_sink:typeof recoverySink==='function',
+    version:bridge&&bridge.version?String(bridge.version):null,
+    character:bridge&&bridge.character?String(bridge.character):null,
+    status:bridge&&typeof bridge.status==='function'?bridge.status:null
+  };
+}
+
+function validateBridge(root,character,{requireRecovery=false}={}){
+  const row=readBridge(root);
+  const failures=[];
+  if(!row.frame_id)failures.push('BRIDGE_FRAME_ID_MISSING');
+  if(!row.alert_sink)failures.push('BRIDGE_ALERT_SINK_MISSING');
+  if(requireRecovery&&!row.recovery_sink)failures.push('BRIDGE_RECOVERY_SINK_MISSING');
+  if(row.character&&character&&row.character!==String(character))failures.push('BRIDGE_CHARACTER_MISMATCH');
+  return{ok:failures.length===0,failures,bridge:row};
+}
+
+async function requestBridgeRecovery(root,request={}){
+  const sink=root&&root[RECOVERY_HOOK];
+  if(typeof sink!=='function'){
+    return{ok:false,error:'BRIDGE_RECOVERY_SINK_MISSING',request};
+  }
+  try{
+    const result=await sink(request);
+    if(result&&result.ok===false)return result;
+    return result&&typeof result==='object'?{ok:true,...result}:{ok:true,result};
+  }catch(error){
+    return{ok:false,error:String(error&&error.message||error),request};
+  }
+}
+
+function createBridgeV3Adapter({
+  frameId,
+  character,
+  deliverAlert,
+  requestRecovery=null,
+  status=()=>({ok:true}),
+  version='2'
+}={}){
+  const fid=String(frameId||'');
+  const who=String(character||'');
+  if(!fid||!who)throw new Error('BRIDGE_V3_IDENTITY_REQUIRED');
+  if(typeof deliverAlert!=='function')throw new Error('BRIDGE_V3_ALERT_DELIVERY_REQUIRED');
+  return{
+    install(root){
+      if(!root)throw new Error('BRIDGE_V3_ROOT_REQUIRED');
+      root[FRAME_KEY]=fid;
+      root[ALERT_HOOK]=async alert=>deliverAlert(alert);
+      if(typeof requestRecovery==='function')root[RECOVERY_HOOK]=async request=>requestRecovery(request);
+      root[BRIDGE_KEY]={
+        contract:CONTRACT_VERSION,
+        version:String(version),
+        frame_id:fid,
+        character:who,
+        status
+      };
+      return validateBridge(root,who);
+    },
+    uninstall(root){
+      if(!root)return{ok:true};
+      try{delete root[ALERT_HOOK];}catch{root[ALERT_HOOK]=null;}
+      try{delete root[RECOVERY_HOOK];}catch{root[RECOVERY_HOOK]=null;}
+      try{delete root[FRAME_KEY];}catch{root[FRAME_KEY]=null;}
+      try{delete root[BRIDGE_KEY];}catch{root[BRIDGE_KEY]=null;}
+      return{ok:true};
+    }
+  };
+}
+
+module.exports={
+  CONTRACT_VERSION,FRAME_KEY,ALERT_HOOK,RECOVERY_HOOK,BRIDGE_KEY,
+  readBridge,validateBridge,requestBridgeRecovery,createBridgeV3Adapter
+};
+
+},{}],
+"adapters/pogipath/BankRouteModel.js":[function(require,module,exports){
+'use strict';
+
+const SOURCE=Object.freeze({
+  repository:'kaansoral/adventureland_mongodb',
+  path:'design/maps.js',
+  blobSha:'78350dac1a18c4eb0e7c6f545ebf08bb3d6729e4'
+});
+
+const BANK_ROUTE_REVISION=1;
+
+const BANK_ROUTE_MODEL=Object.freeze({
+  schema:1,
+  kind:'BANK_FLOOR_ROUTE_MODEL',
+  activation:Object.freeze({mode:'SHADOW_ASSISTED',live:false}),
+  source:SOURCE,
+  maps:Object.freeze([
+    Object.freeze({id:'bank',label:'Main Bank'}),
+    Object.freeze({id:'bank_b',label:'Bank Basement'}),
+    Object.freeze({id:'bank_u',label:'Upper Bank'})
+  ]),
+  nodes:Object.freeze([
+    Object.freeze({id:'bank',map:'bank'}),
+    Object.freeze({id:'bank_b',map:'bank_b'}),
+    Object.freeze({id:'bank_u',map:'bank_u'})
+  ]),
+  edges:Object.freeze([
+    Object.freeze({id:'bank->bank_b',from:'bank',to:'bank_b',type:'BANK_DOOR',enabled:true,locked:true}),
+    Object.freeze({id:'bank_b->bank',from:'bank_b',to:'bank',type:'BANK_DOOR',enabled:true}),
+    Object.freeze({id:'bank_b->bank_u',from:'bank_b',to:'bank_u',type:'BANK_DOOR',enabled:true,locked:true}),
+    Object.freeze({id:'bank_u->bank_b',from:'bank_u',to:'bank_b',type:'BANK_DOOR',enabled:true})
+  ])
+});
+
+const BANK_FLOORS=Object.freeze(BANK_ROUTE_MODEL.maps.map(x=>x.id));
+const BANK_GRAPH=Object.freeze({
+  bank:Object.freeze(['bank_b']),
+  bank_b:Object.freeze(['bank','bank_u']),
+  bank_u:Object.freeze(['bank_b'])
+});
+
+module.exports={SOURCE,BANK_ROUTE_REVISION,BANK_ROUTE_MODEL,BANK_FLOORS,BANK_GRAPH};
+
+},{}],
+"adapters/storage/LocalStorageChangeStore.js":[function(require,module,exports){
+'use strict';
+
+function clone(value){
+  return value == null ? value : JSON.parse(JSON.stringify(value));
+}
+
+function createLocalStorageChangeStore({
+  storage=(typeof globalThis!=='undefined' ? globalThis.localStorage : null),
+  key='Pogi_V3_Change_Verification_v1'
+}={}){
+  if(!storage || typeof storage.getItem!=='function' || typeof storage.setItem!=='function'){
+    throw new Error('LOCAL_STORAGE_REQUIRED');
+  }
+
+  return {
+    async load(){
+      const raw=storage.getItem(key);
+      if(!raw) return null;
+      try{return clone(JSON.parse(raw));}
+      catch(error){
+        throw new Error('CHANGE_STORE_INVALID_JSON');
+      }
+    },
+    async save(state){
+      storage.setItem(key,JSON.stringify(state));
+      return true;
+    },
+    key
+  };
+}
+
+module.exports={createLocalStorageChangeStore};
+
+},{}],
+"adapters/storage/LocalStorageKeyValueStore.js":[function(require,module,exports){
+'use strict';
+
+function clone(value){return value==null?value:JSON.parse(JSON.stringify(value));}
+
+function createLocalStorageKeyValueStore({storage=(typeof globalThis!=='undefined'?globalThis.localStorage:null),prefix='Pogi_V3_'}={}){
+  if(!storage||typeof storage.getItem!=='function'||typeof storage.setItem!=='function')throw new Error('LOCAL_STORAGE_REQUIRED');
+  const key=k=>prefix+String(k);
+  return{
+    async get(k){const raw=storage.getItem(key(k));if(raw==null)return null;try{return clone(JSON.parse(raw));}catch{return null;}},
+    async set(k,v){storage.setItem(key(k),JSON.stringify(v));return true;},
+    async delete(k){storage.removeItem(key(k));return true;}
+  };
+}
+
+module.exports={createLocalStorageKeyValueStore};
+
+},{}],
+"bootstrap/Bootstrap.js":[function(require,module,exports){
+'use strict';
+
+const manifest=require('./Manifest');
+const {createRuntimeEpoch}=require('../core/runtime/RuntimeEpoch');
+const {createFrameLease}=require('../core/runtime/FrameLease');
+const {createProductiveHeartbeat}=require('../core/health/ProductiveHeartbeat');
+const {createLifecycleSupervisor}=require('../core/lifecycle/LifecycleSupervisor');
+const {createModuleSupervisor}=require('../core/modules/ModuleSupervisor');
+const {createRecoveryVerifier}=require('../core/recovery/RecoveryVerifier');
+const {createRecoveryImageGuard}=require('../core/recovery/RecoveryImageGuard');
+const {createDeploymentSafety}=require('../core/safety/DeploymentSafety');
+const {createRecoveryCoordinator}=require('../core/recovery/RecoveryCoordinator');
+const {createRecoveryExecutor}=require('../core/recovery/RecoveryExecutor');
+const {createRuntimeProof}=require('../core/runtime/RuntimeProof');
+const {createStaleCodeGuard}=require('../core/runtime/StaleCodeGuard');
+const {createActivationGate}=require('../core/runtime/ActivationGate');
+const {createCoreSupervisor}=require('../core/supervision/CoreSupervisor');
+const {createLocalStorageKeyValueStore}=require('../adapters/storage/LocalStorageKeyValueStore');
+const {createDefaultChangeVerificationRuntime}=require('../core/change-verification/createDefaultRuntime');
+
+function defaultHooks(root){
+  return{
+    game:!!(root&&root.game),
+    character:!!(root&&root.character),
+    move:!!(root&&typeof root.move==='function'),
+    smart_move:!!(root&&typeof root.smart_move==='function'),
+    use_skill:!!(root&&typeof root.use_skill==='function')
+  };
+}
+
+async function bootstrapV3({
+  root=(typeof globalThis!=='undefined'?globalThis:{}),
+  character,
+  frameId,
+  store,
+  now=Date.now,
+  hooks=defaultHooks,
+  modules=[],
+  activationMode='development',
+  bootRequest=null,
+  supervisorIntervalMs=5000,
+  supervisorTimer={}
+}={}){
+  const characterName=String(character||(root.character&&root.character.name)||'');
+  const frame=String(frameId||root.__POGI_BRIDGE_FRAME_ID||'');
+  if(!manifest.required_characters.includes(characterName))throw new Error('V3_UNEXPECTED_CHARACTER:'+characterName);
+  if(!frame)throw new Error('V3_FRAME_ID_REQUIRED');
+
+  const staleGuard=createStaleCodeGuard({manifest,root,storage:root.localStorage,now});
+  const activationGate=createActivationGate({manifest,staleGuard});
+  const activation=activationGate.verify({
+    mode:activationMode,
+    root,
+    character:characterName,
+    frameId:frame,
+    entrypoint:bootRequest&&bootRequest.entrypoint||manifest.entrypoint,
+    build:bootRequest&&bootRequest.build||manifest.build
+  });
+  if(!activation.ok){
+    return{ok:false,error:'V3_ACTIVATION_BLOCKED',activation};
+  }
+
+  const recoveryImageGuard=createRecoveryImageGuard({manifest});
+  const recoveryImage=bootRequest&&bootRequest.recovery&&bootRequest.recovery.image||null;
+  let recoveryIdentity=null;
+  if(recoveryImage){
+    const checked=recoveryImageGuard.verifyImage(recoveryImage);
+    if(!checked.ok){
+      return{ok:false,error:'V3_RECOVERY_IMAGE_BLOCKED',recovery:checked};
+    }
+    recoveryIdentity={snapshot_id:checked.snapshot_id,tree_hash:checked.tree_hash};
+  }
+  staleGuard.arm(recoveryIdentity);
+
+  const kv=store||createLocalStorageKeyValueStore({storage:root.localStorage});
+  const epoch=createRuntimeEpoch({build:manifest.build,character:characterName,frameId:frame,now});
+  const lease=createFrameLease({store:kv,character:characterName,frameId:frame,epoch:epoch.epoch,now});
+  const acquired=await lease.acquire();
+  if(!acquired.ok)throw new Error(acquired.error);
+
+  const heartbeat=createProductiveHeartbeat({characters:manifest.required_characters,now});
+  const lifecycle=createLifecycleSupervisor({build:manifest.build,heartbeat,now});
+  const recoveryVerifier=createRecoveryVerifier({
+    requiredCharacters:manifest.required_characters,
+    expectedBuild:manifest.build,
+    expectedRecovery:recoveryIdentity
+  });
+  const deploymentSafety=createDeploymentSafety({affectedCharacters:manifest.required_characters,fighters:manifest.fighters,now});
+  const recovery=createRecoveryCoordinator();
+  const recoveryExecutor=createRecoveryExecutor({coordinator:recovery});
+  if(String(activationMode).toLowerCase()==='supervised'){
+    recoveryExecutor.recover=async()=>({ok:false,executed:false,
+      error:'V3_SUPERVISED_RECOVERY_DISABLED',action:'STOP_AND_ALERT'});
+  }
+  staleGuard.publishBootProof(epoch);
+
+  const changes=createDefaultChangeVerificationRuntime({root,now});
+  await changes.start();
+
+  const moduleSupervisor=createModuleSupervisor({
+    now,
+    onAlert:async event=>changes.alertManager.publish({
+      id:'v3-module:'+String(event.module||'unknown')+':'+String(event.event||'event')+':'+String(Number(now())),
+      kind:'V3_MODULE_SUPERVISION',
+      event:String(event.event||event.kind||'MODULE_EVENT'),
+      severity:event.critical===true?'error':'error',
+      title:'V3 module '+String(event.event||'failure'),
+      body:String(event.module||'unknown')+' | '+String(event.error||event.status||'module event'),
+      module:event.module||null,
+      requires_action:true,
+      at:Number(now()),
+      data:event
+    })
+  });
+
+  const proof=createRuntimeProof({
+    root,manifest,epoch,lifecycle,heartbeat,frameLease:lease,recoveryIdentity,now
+  });
+
+  lifecycle.advance(characterName,'HOOKS_READY',{hooks:hooks(root)});
+  const hookState=hooks(root);
+  if(Object.values(hookState).some(v=>v!==true)){
+    lifecycle.fail(characterName,'REQUIRED_GAME_HOOK_MISSING');
+    await proof.publish();
+    return{
+      ok:false,error:'REQUIRED_GAME_HOOK_MISSING',
+      runtime:{
+        manifest,epoch,lease,heartbeat,lifecycle,moduleSupervisor,recoveryVerifier,recoveryImageGuard,
+        deploymentSafety,recovery,proof,changes
+      }
+    };
+  }
+
+  lifecycle.advance(characterName,'CONTROLLER_READY');
+  heartbeat.controllerBeat(characterName,{source:'bootstrap'});
+
+  for(const entry of modules){
+    moduleSupervisor.register(entry.name,entry.module,{
+      critical:entry.critical===true,
+      version:entry.version||'1',
+      dependencies:entry.dependencies||[],
+      resources:entry.resources||[]
+    });
+  }
+  const moduleStart=await moduleSupervisor.startAll({root,character:characterName,epoch});
+  if(!moduleStart.core_ready){
+    lifecycle.fail(characterName,'CRITICAL_CORE_MODULE_FAILED');
+    await proof.publish();
+    return{ok:false,error:'CRITICAL_CORE_MODULE_FAILED'};
+  }
+
+  lifecycle.advance(characterName,'ROLE_READY');
+
+  const supervisor=createCoreSupervisor({
+    character:characterName,
+    lease,
+    heartbeat,
+    lifecycle,
+    moduleSupervisor,
+    proof,
+    // P1 supervised runtime can report stalled progress but cannot execute Recovery.
+    recovery:String(activationMode).toLowerCase()==='supervised'?null:recovery,
+    recoveryExecutor:String(activationMode).toLowerCase()==='supervised'?null:recoveryExecutor,
+    alertManager:changes.alertManager,
+    now,
+    intervalMs:supervisorIntervalMs,
+    setIntervalFn:supervisorTimer.setIntervalFn||setInterval,
+    clearIntervalFn:supervisorTimer.clearIntervalFn||clearInterval
+  });
+
+  const runtime={
+    manifest,epoch,lease,heartbeat,lifecycle,moduleSupervisor,recoveryVerifier,recoveryImageGuard,
+    recoveryIdentity,deploymentSafety,recovery,recoveryExecutor,proof,changes,staleGuard,activationGate,activation,supervisor,
+    markProgress(kind,detail){
+      heartbeat.progress(characterName,kind,detail);
+      if(lifecycle.status(characterName).stage==='ROLE_READY')lifecycle.advance(characterName,'ACTIVE',{first_progress:kind});
+      return proof.publish();
+    },
+    controllerBeat(detail){heartbeat.controllerBeat(characterName,detail);return proof.publish();},
+    async shutdown(){
+      supervisor.stop();
+      await moduleSupervisor.stopAll({reason:'RUNTIME_SHUTDOWN'});
+      proof.clear();
+      return lease.release();
+    }
+  };
+
+  root.__POGI_V3_RUNTIME=runtime;
+  supervisor.start();
+  await proof.publish();
+  return{ok:true,runtime};
+}
+
+module.exports={bootstrapV3,defaultHooks};
+
+},{"./Manifest":"bootstrap/Manifest.js","../core/runtime/RuntimeEpoch":"core/runtime/RuntimeEpoch.js","../core/runtime/FrameLease":"core/runtime/FrameLease.js","../core/health/ProductiveHeartbeat":"core/health/ProductiveHeartbeat.js","../core/lifecycle/LifecycleSupervisor":"core/lifecycle/LifecycleSupervisor.js","../core/modules/ModuleSupervisor":"core/modules/ModuleSupervisor.js","../core/recovery/RecoveryVerifier":"core/recovery/RecoveryVerifier.js","../core/recovery/RecoveryImageGuard":"core/recovery/RecoveryImageGuard.js","../core/safety/DeploymentSafety":"core/safety/DeploymentSafety.js","../core/recovery/RecoveryCoordinator":"core/recovery/RecoveryCoordinator.js","../core/recovery/RecoveryExecutor":"core/recovery/RecoveryExecutor.js","../core/runtime/RuntimeProof":"core/runtime/RuntimeProof.js","../core/runtime/StaleCodeGuard":"core/runtime/StaleCodeGuard.js","../core/runtime/ActivationGate":"core/runtime/ActivationGate.js","../core/supervision/CoreSupervisor":"core/supervision/CoreSupervisor.js","../adapters/storage/LocalStorageKeyValueStore":"adapters/storage/LocalStorageKeyValueStore.js","../core/change-verification/createDefaultRuntime":"core/change-verification/createDefaultRuntime.js"}],
+"bootstrap/CharacterBootstrap.js":[function(require,module,exports){
+'use strict';
+
+const {bootstrapV3}=require('./Bootstrap');
+const {createDefaultCatalog}=require('./DefaultCatalog');
+const {createResourceArbiter}=require('../core/ownership/ResourceArbiter');
+const {createStateEngine}=require('../core/state/StateEngine');
+const {createStateCoordinator}=require('../core/state/StateCoordinator');
+const {createDefaultStateHandlers}=require('./StateHandlers');
+const {createRuntimeScheduler}=require('../core/scheduler/RuntimeScheduler');
+const {createRoleDecider}=require('../core/scheduler/RoleDecider');
+const {createReadinessAudit}=require('../core/health/ReadinessAudit');
+const manifest=require('./Manifest');
+const {createLocalStorageKeyValueStore}=require('../adapters/storage/LocalStorageKeyValueStore');
+const {createBankRecoveryStore}=require('../core/recovery/BankRecoveryStore');
+const {requestBridgeRecovery}=require('../adapters/bridge/BridgeV3Contract');
+const {createP1SupervisedTickGate}=require('./P1SupervisedTickGate');
+const {createPriestHealingHeartbeat}=require('../characters/priest/PriestHealingHeartbeat');
+const {mainHierarchy,gameplayHierarchy,safetyHierarchy}=require('../states/StateRegistry');
+
+async function bootstrapCharacterV3({
+  root=(typeof globalThis!=='undefined'?globalThis:{}),
+  character,
+  frameId,
+  adapters={},
+  config={},
+  eventHandlers={},
+  restore={},
+  now=Date.now,
+  catalog=createDefaultCatalog(),
+  arbiter=createResourceArbiter({now}),
+  requireCompleteRole=false,
+  activationMode='development',
+  bootRequest=null,
+  bootstrapOptions={}
+}={}){
+  const name=String(character||(root.character&&root.character.name)||'');
+  if(!name)throw new Error('V3_CHARACTER_REQUIRED');
+
+  // An independently started Souji heartbeat remains active from First State.
+  // This covers native-route entrypoints that build V3 directly (no P1 wrapper)
+  // without creating a second healer loop for the approved P1 launch.
+  if(name==='Souji'&&config.nativeRouteMode===true&&root.character&&
+     root.character.name==='Souji'&&typeof root.use_skill==='function'){
+    const existing=root.__POGI_V3_PRIEST_HEAL;
+    let active=false;
+    try{active=!!existing&&typeof existing.status==='function'&&
+      existing.status().running===true;}catch{}
+    if(!active){
+      const healer=createPriestHealingHeartbeat({root,now,
+        setIntervalFn:bootstrapOptions.priestHealTimer?.setIntervalFn||setInterval,
+        clearIntervalFn:bootstrapOptions.priestHealTimer?.clearIntervalFn||clearInterval});
+      root.__POGI_V3_PRIEST_HEAL=healer;
+      healer.start();
+    }
+  }
+
+  const effectiveRestore={...(restore&&typeof restore==='object'?restore:{})};
+  let bankRecoveryStore=null;
+  let bankRecoveryLoad=null;
+  if(name==='Rentaro'&&root&&root.localStorage){
+    const kv=createLocalStorageKeyValueStore({storage:root.localStorage});
+    bankRecoveryStore=createBankRecoveryStore({
+      store:kv,
+      character:name,
+      build:manifest.build,
+      now
+    });
+    bankRecoveryLoad=await bankRecoveryStore.load();
+    if(effectiveRestore.Bank==null&&bankRecoveryLoad&&bankRecoveryLoad.ok===true&&bankRecoveryLoad.found===true){
+      effectiveRestore.Bank=bankRecoveryLoad.session;
+    }
+  }
+
+  const context={
+    root,
+    character:name,
+    adapters,
+    config,
+    eventHandlers,
+    restore:effectiveRestore,
+    bankRecoveryStore,
+    bankRecoveryLoad,
+    now,
+    arbiter,
+    services:{}
+  };
+
+  const roleBuild=await catalog.buildRole(name,context,['CoreSupervisor']);
+  if(!roleBuild.ok){
+    return{ok:false,error:'ROLE_REQUIRED_MODULES_UNAVAILABLE',roleBuild};
+  }
+  if(requireCompleteRole&&roleBuild.missing_optional.length){
+    return{ok:false,error:'ROLE_OPTIONAL_MODULES_INCOMPLETE',roleBuild};
+  }
+
+  const boot=await bootstrapV3({
+    root,
+    character:name,
+    frameId,
+    modules:roleBuild.entries,
+    now,
+    activationMode,
+    bootRequest,
+    ...bootstrapOptions
+  });
+  if(!boot.ok)return{...boot,roleBuild};
+
+  boot.runtime.role={
+    character:roleBuild.character,
+    role:roleBuild.role,
+    missing_optional:roleBuild.missing_optional.slice()
+  };
+  boot.runtime.services=roleBuild.services;
+  boot.runtime.arbiter=arbiter;
+  boot.runtime.moduleCatalog=catalog;
+  boot.runtime.bankRecoveryStore=bankRecoveryStore;
+  boot.runtime.bankRecoveryLoad=bankRecoveryLoad;
+  boot.runtime.bankRecoveryStatus=()=>bankRecoveryStore?bankRecoveryStore.status():null;
+
+  const stateEngine=createStateEngine({main:'IDLE',now});
+  const stateCoordinator=createStateCoordinator({
+    stateEngine,
+    now,
+    onProgress:async(kind,detail)=>boot.runtime.markProgress(kind,detail)
+  });
+  const stateHandlers=createDefaultStateHandlers(roleBuild.services);
+  for(const [stateName,stateHandler] of Object.entries(stateHandlers)){
+    stateCoordinator.register(stateName,stateHandler);
+  }
+  boot.runtime.stateEngine=Object.freeze({
+    getStatus:stateEngine.getStatus,
+    setSide:stateEngine.setSide,
+    clearSide:stateEngine.clearSide
+  });
+  boot.runtime.stateCoordinator=stateCoordinator;
+  boot.runtime.stateHandlers=stateHandlers;
+
+  const control={
+    pause:async(reason='MANUAL_PAUSE',options={})=>stateCoordinator.requestPause(
+      String(reason||'MANUAL_PAUSE'),
+      {finishBank:options&&options.finishBank!==false}
+    ),
+    resume:async()=>stateCoordinator.resumeAll(),
+    status:()=>stateCoordinator.status(),
+    hierarchy:()=>({
+      main:mainHierarchy(),
+      safety:safetyHierarchy(),
+      gameplay:gameplayHierarchy()
+    })
+  };
+  boot.runtime.control=control;
+  if(root&&typeof root==='object'){
+    root.pogi_v3_pause=control.pause;
+    root.pogi_v3_resume=control.resume;
+    root.pogi_v3_state_status=control.status;
+    root.pogi_v3_state_hierarchy=control.hierarchy;
+    // Explicit, Mage-only boss support call. A boss sighting by itself
+    // never interrupts Hibari and Souji's mob farm.
+    const callBossHelpers=targets=>{
+      const boss=roleBuild.services.WorldBoss;
+      if(name!=='Harutora'||!boss||typeof boss.requestHelp!=='function')
+        return{ok:false,error:'MAGE_BOSS_CALL_UNAVAILABLE'};
+      return boss.requestHelp(Array.isArray(targets)?targets:['Hibari','Souji']);
+    };
+    if(name==='Harutora')root.pogi_v3_call_boss_helpers=callBossHelpers;
+
+    const baseShutdown=boot.runtime.shutdown.bind(boot.runtime);
+    boot.runtime.shutdown=async()=>{
+      if(root.pogi_v3_pause===control.pause)delete root.pogi_v3_pause;
+      if(root.pogi_v3_resume===control.resume)delete root.pogi_v3_resume;
+      if(root.pogi_v3_state_status===control.status)delete root.pogi_v3_state_status;
+      if(root.pogi_v3_state_hierarchy===control.hierarchy)delete root.pogi_v3_state_hierarchy;
+      if(root.pogi_v3_call_boss_helpers===callBossHelpers)delete root.pogi_v3_call_boss_helpers;
+      return baseShutdown();
+    };
+  }
+
+  const baseDecider=createRoleDecider({
+    character:roleBuild.character,
+    role:roleBuild.role,
+    services:roleBuild.services
+  });
+  // P1 user-present supervised farm session: Bank is not implemented by LiveAdapters.
+  // Never fake Bank success or route a real Merchant into an unavailable BANK state.
+  // All production modes retain their unchanged role decision policy.
+  const decider=String(activationMode).toLowerCase()==='supervised'&&
+    name==='Rentaro'&&!roleBuild.services.Bank
+    ?async context=>{
+      const decision=await baseDecider(context);
+      if(decision&&decision.state==='BANK')return{
+        state:'IDLE',reason:'P1_SUPERVISED_BANK_UNAVAILABLE_MANUAL_HOLD',
+        deferred:decision
+      };
+      return decision;
+    }:baseDecider;
+  // In user-present P1 supervised farm mode, even a running CODE slot
+  // cannot tick a fighter state without a separate verified party admission.
+  // Production/development schedulers retain their existing behavior.
+  // Explicit, user-present native-route mode keeps supervised CODE/session
+  // identity verification but does NOT depend on the old Bridge-only farm
+  // admission. Farm/PartyCoordination still block attacks without required
+  // live teammates. Existing Bridge-gated P1 mode remains unchanged by default.
+  const supervisedFighterTickGate=String(activationMode).toLowerCase()==='supervised'&&
+    ['Souji','Hibari','Harutora'].includes(name)&&config.nativeRouteMode!==true
+    ?createP1SupervisedTickGate({
+      root,role:name,now,
+      verifyAdmission:adapters?.supervisedFarmAdmission&&
+        typeof adapters.supervisedFarmAdmission.verify==='function'
+        ?sample=>adapters.supervisedFarmAdmission.verify(sample):null
+    }):null;
+  // A deliberately blocked supervised FARM tick must be visible to Core
+  // without being mistaken for a stalled state needing Recovery. No fake
+  // progress is recorded; the proof still shows unproductive while held.
+  if(supervisedFighterTickGate){
+    boot.runtime.supervisor.setGameplayHold('P1_AWAITING_FARM_ADMISSION');
+  }
+  const scheduler=createRuntimeScheduler({
+    coordinator:stateCoordinator,
+    decide:decider,
+    tickGate:supervisedFighterTickGate?()=>supervisedFighterTickGate.check():null,
+    onTickGate:supervisedFighterTickGate?({allow,reason})=>
+      boot.runtime.supervisor.setGameplayHold(allow?null:reason):null,
+    alertManager:boot.runtime.changes&&boot.runtime.changes.alertManager||null,
+    now
+  });
+  const readinessAudit=createReadinessAudit({manifest});
+
+  async function requestExternalRecovery(scope,action,detail={}){
+    const wasRunning=!!scheduler.status().running;
+    if(wasRunning)scheduler.stop();
+    const request={
+      schema:1,
+      brain:'V3',
+      scope:String(scope),
+      action:String(action),
+      reason:String(detail.reason||'PRODUCTIVE_PROGRESS_STALE'),
+      character:name,
+      frame_id:String(frameId||boot.runtime.epoch&&boot.runtime.epoch.frame_id||''),
+      epoch:String(boot.runtime.epoch&&boot.runtime.epoch.epoch||''),
+      build:String(manifest.build),
+      at:Number(now()),
+      detail
+    };
+    const result=await requestBridgeRecovery(root,request);
+    if(!result||result.ok===false){
+      if(wasRunning)scheduler.start();
+      return result;
+    }
+    boot.runtime.lifecycle.fail(name,'RECOVERY_HANDOFF_'+String(scope).toUpperCase());
+    await boot.runtime.proof.publish();
+    return result;
+  }
+
+  boot.runtime.recoveryExecutor
+    .register('state',async detail=>{
+      const current=stateCoordinator.status().current;
+      if(current==='IDLE'){
+        return{ok:true,deferred:true,reason:'NO_ACTIVE_STATE_TO_RECOVER',state:'IDLE'};
+      }
+      const wasRunning=!!scheduler.status().running;
+      if(wasRunning)scheduler.stop();
+      try{
+        return await stateCoordinator.recoverCurrent({
+          reason:String(detail&&detail.reason||'PRODUCTIVE_PROGRESS_STALE')
+        });
+      }finally{
+        if(wasRunning)scheduler.start();
+      }
+    })
+    .register('controller',detail=>requestExternalRecovery('controller','RESTART_V3_RUNTIME',detail))
+    .register('frame',detail=>requestExternalRecovery('frame','RECREATE_CHARACTER_FRAME',detail))
+    .register('browser',detail=>requestExternalRecovery('browser','RESTART_BROWSER_SESSION',detail));
+
+  boot.runtime.scheduler=scheduler;
+  boot.runtime.decider=decider;
+  boot.runtime.readinessAudit=readinessAudit;
+  boot.runtime.readiness=()=>readinessAudit.audit({
+    character:roleBuild.character,
+    role:roleBuild.role,
+    moduleSupervisor:boot.runtime.moduleSupervisor,
+    stateCoordinator,
+    bridgeRoot:root,
+    activationMode
+  });
+
+  if(roleBuild.missing_optional.length&&boot.runtime.changes&&boot.runtime.changes.alertManager){
+    await boot.runtime.changes.alertManager.publish({
+      id:'v3-role-incomplete:'+name+':'+String(Number(now())),
+      kind:'V3_ROLE_LOAD',
+      event:'ROLE_OPTIONAL_MODULES_INCOMPLETE',
+      severity:'info',
+      title:'V3 role loaded with optional modules unavailable',
+      body:name+' | '+roleBuild.missing_optional.join(', '),
+      character:name,
+      requires_action:false,
+      at:Number(now()),
+      data:{missing_optional:roleBuild.missing_optional.slice()}
+    });
+  }
+
+  return{ok:true,runtime:boot.runtime,roleBuild};
+}
+
+module.exports={bootstrapCharacterV3};
+
+},{"./Bootstrap":"bootstrap/Bootstrap.js","./DefaultCatalog":"bootstrap/DefaultCatalog.js","../core/ownership/ResourceArbiter":"core/ownership/ResourceArbiter.js","../core/state/StateEngine":"core/state/StateEngine.js","../core/state/StateCoordinator":"core/state/StateCoordinator.js","./StateHandlers":"bootstrap/StateHandlers.js","../core/scheduler/RuntimeScheduler":"core/scheduler/RuntimeScheduler.js","../core/scheduler/RoleDecider":"core/scheduler/RoleDecider.js","../core/health/ReadinessAudit":"core/health/ReadinessAudit.js","./Manifest":"bootstrap/Manifest.js","../adapters/storage/LocalStorageKeyValueStore":"adapters/storage/LocalStorageKeyValueStore.js","../core/recovery/BankRecoveryStore":"core/recovery/BankRecoveryStore.js","../adapters/bridge/BridgeV3Contract":"adapters/bridge/BridgeV3Contract.js","./P1SupervisedTickGate":"bootstrap/P1SupervisedTickGate.js","../characters/priest/PriestHealingHeartbeat":"characters/priest/PriestHealingHeartbeat.js","../states/StateRegistry":"states/StateRegistry.js"}],
+"bootstrap/DefaultCatalog.js":[function(require,module,exports){
+'use strict';
+
+const {createModuleCatalog,lifecycleFacade}=require('../core/modules/ModuleCatalog');
+const {createMovementService}=require('../ligaments/movement/MovementService');
+const {createInventoryService}=require('../ligaments/inventory/InventoryService');
+const {createTargetingService}=require('../ligaments/targeting/TargetingService');
+const {createPartyCoordinationService}=require('../ligaments/party/PartyCoordinationService');
+const {createCooldownService}=require('../ligaments/skills/CooldownService');
+const {createMluckService}=require('../ligaments/skills/MluckService');
+const {createGearService}=require('../ligaments/gear/GearService');
+const RecipeIntelligence=require('../ligaments/crafting/RecipeIntelligence');
+const {createCombatService}=require('../ligaments/combat/CombatService');
+const {createFighterActionExecutor}=require('../ligaments/combat/FighterActionExecutor');
+const {createFarmState}=require('../organs/farm/FarmState');
+const {createStandState}=require('../organs/stand/StandState');
+const {createBankState}=require('../organs/bank/BankState');
+const {createBankNavigation}=require('../organs/bank/BankNavigation');
+const {createBankTravelOps}=require('../organs/bank/BankTravelOps');
+const {createGearHandoffService}=require('../ligaments/gear/GearHandoffService');
+const {createGearHandoffPlanner}=require('../ligaments/gear/GearHandoffPlanner');
+const {createShopLimb}=require('../ligaments/shop/ShopLimb');
+const {createShopService}=require('../ligaments/shop/ShopService');
+const {createShopBankHandoff}=require('../ligaments/shop/ShopBankHandoff');
+const {createBankStoreOps}=require('../organs/bank/BankStoreOps');
+const {createBankRetrieveOps}=require('../organs/bank/BankRetrieveOps');
+const {createBankHandoffOps}=require('../organs/bank/BankHandoffOps');
+const {createScanBossState}=require('../organs/bosses/ScanBossState');
+const BossPolicy=require('../organs/bosses/BossPolicy');
+const {createBossMissionCoordinator}=require('../organs/bosses/BossMissionCoordinator');
+const {createWorldBossState}=require('../organs/bosses/WorldBossState');
+const {createEventState}=require('../organs/events/EventState');
+const {createDefensivePvp}=require('../organs/pvp-defense/DefensivePvp');
+const GearControlPlane=require('../organs/gear/GearControlPlane');
+const {createGearProductionExecutor}=require('../organs/gear/GearProductionExecutor');
+const {createMerchantController}=require('../characters/merchant/MerchantController');
+const {createPriestController}=require('../characters/priest/PriestController');
+const {createMageController}=require('../characters/mage/MageController');
+const {createWarriorController}=require('../characters/warrior/WarriorController');
+
+function wrapped(service){
+  return{service,module:lifecycleFacade(service)};
+}
+
+function createDefaultCatalog(){
+  const catalog=createModuleCatalog();
+
+  catalog.register('Movement',{
+    resources:['MOVEMENT'],
+    available:ctx=>!!(ctx.arbiter&&ctx.adapters&&ctx.adapters.movement),
+    factory:async ctx=>wrapped(createMovementService({arbiter:ctx.arbiter,adapter:ctx.adapters.movement}))
+  });
+
+  catalog.register('Targeting',{
+    factory:async ctx=>wrapped(createTargetingService({now:ctx.now||Date.now}))
+  });
+
+  catalog.register('Party
