@@ -3,7 +3,21 @@
   'use strict';
   const role=root?.character?.name;
   if(!['Rentaro','Souji','Hibari','Harutora'].includes(role))return;
-  if(root.__O66_DIRECT_LOADING===true||root.__POGI_V3_DIRECT_STATUS?.active===true)return;
+  // Emergency live formation repair can be applied to an already-running
+  // fighter without restarting its CODE frame or the browser.
+  async function applyFormation(){
+    if(role==='Rentaro')return;
+    if(root.__O66_V3_FORMATION_REPAIR?.active===true)return;
+    const url='https://raw.githubusercontent.com/gbertz1/pogi-code-delivery/main/order66-v3-direct-20261122-v3/formation-repair-20261123.js';
+    const res=await root.fetch(url,{cache:'no-store',mode:'cors'});
+    if(!res.ok)throw Error('O66_FORMATION_DOWNLOAD_HTTP_'+res.status);
+    root.eval(await res.text());
+  }
+  if(root.__O66_DIRECT_LOADING===true)return;
+  if(root.__POGI_V3_DIRECT_STATUS?.active===true){
+    void applyFormation().catch(e=>console.error('O66_FORMATION_LIVE_ERROR',role,e));
+    return;
+  }
   root.__O66_DIRECT_LOADING=true;
   const status={role,phase:'FETCH',at:Date.now(),error:null};
   root.__O66_DIRECT_LOAD_STATUS=status;
@@ -28,6 +42,7 @@
     }
     status.phase='EVAL';
     (0,eval)(texts.join(''));
+    await applyFormation();
     status.phase='STARTED';
   }catch(e){
     status.phase='FAILED';status.error=String(e&&e.message||e);
