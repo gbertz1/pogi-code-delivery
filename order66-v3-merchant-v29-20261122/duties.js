@@ -11,12 +11,17 @@ const ANCHOR={map:'main',x:25.55,y:-30.92};
 const MAIN_TOWN={map:'main',x:0,y:0};
 const BANK_ENTRY={map:'main',x:168,y:-134};
 const WAIT_STAND_MS=180000,WAIT_PICKUP_MS=18000,WAIT_BETWEEN_MS=500;
-const FREE_SLOTS_BANK=5,DEPOSIT_AT_GOLD=60000000,RETAIN_GOLD=50000000;
+// PogiPath v64 is an EDITABLE UNVALIDATED DRAFT, not a production route.
+// Keep essential native merchant duties active until the updated route is live certified.
+const REPAIRED_TOWN_DUTIES_ONLY=true;
+const BANK_FAILURE_RETRY_MS=300000;
+let bankDeferredUntil=0;
+const FREE_SLOTS_BANK=5,DEPOSIT_AT_GOLD=250000,RETAIN_GOLD=50000;
 const PARTY_NAMES=new Set(['Hibari','Harutora','Souji']);
 const BANKABLE_ITEMS0=new Set(['ascale','bfur','bwing','cscale','dstones','essenceoffrost','essenceoffire','essenceofgreed','feather0','funtoken','gem1','gemfragment','leather','lotusf','mistletoe','monstertoken','ornament','pleather','pvptoken','rattail','seashell','smush','spidersilk','snakefang','stormfeather','svenom','talkingskull','voidthread']);
 const MAX_BANK_ITEMS_PER_TRIP=8;
 const previousMerchant=host.__O66_MERCHANT_DUTIES;
-const state={version:29,owner:OWNER,phase:'STARTING',active:true,startedAt:now(),updatedAt:now(),stopRequested:false,patrolCycles:Number(previousMerchant?.patrolCycles||0),standOpens:Number(previousMerchant?.standOpens||0),bankVisits:Number(previousMerchant?.bankVisits||0),bankGoldDeposited:Number(previousMerchant?.bankGoldDeposited||0),itemsStored:Number(previousMerchant?.itemsStored||0),partyPickups:Number(previousMerchant?.partyPickups||0),scares:Number(previousMerchant?.scares||0),potions:Number(previousMerchant?.potions||0),lastError:null,events:[],standUntil:null,partyDisabled:false,partyLaunchDisabled:true,shopAutoSalesDisabled:true,scoutRoute:'v29',minGoldToDeposit:DEPOSIT_AT_GOLD,retainGold:RETAIN_GOLD};
+const state={version:29,release:'TOWN_DUTIES_RESTORED_V64_DRAFT_HOLD',patrolSuppressed:REPAIRED_TOWN_DUTIES_ONLY,owner:OWNER,phase:'STARTING',active:true,startedAt:now(),updatedAt:now(),stopRequested:false,patrolCycles:Number(previousMerchant?.patrolCycles||0),standOpens:Number(previousMerchant?.standOpens||0),bankVisits:Number(previousMerchant?.bankVisits||0),bankGoldDeposited:Number(previousMerchant?.bankGoldDeposited||0),itemsStored:Number(previousMerchant?.itemsStored||0),partyPickups:Number(previousMerchant?.partyPickups||0),scares:Number(previousMerchant?.scares||0),potions:Number(previousMerchant?.potions||0),lastError:null,events:[],standUntil:null,partyDisabled:false,partyLaunchDisabled:true,shopAutoSalesDisabled:true,scoutRoute:'v29',minGoldToDeposit:DEPOSIT_AT_GOLD,retainGold:RETAIN_GOLD};
 if(host.__O66_MERCHANT_DUTIES?.active||host.__O66_MERCHANT_DUTIES_V1?.active){return;}
 host.__O66_MERCHANT_DUTIES=state;
 host.__O66_MERCHANT_DUTIES_V1=state;
@@ -82,6 +87,19 @@ async function closeStand(){
 }
 async function atStand(){
  assertHealthy('main');
+ // Fresh respawn is Main (-87,673), not the stand (-300,-100).
+ // Use the native Town skill to return to the known spawn before
+ // following the existing fixed MAIN_TOWN -> ANCHOR -> STAND legs.
+ if(distance(pos(),IDLE)>170&&distance(pos(),MAIN_TOWN)>100&&root.can_use?.('use_town')!==false){
+   try{
+     const r=root.use_skill('use_town');if(r?.then)await r;
+     const deadline=now()+9000;
+     while(now()<deadline&&distance(pos(),MAIN_TOWN)>50)await delay(200);
+     if(distance(pos(),MAIN_TOWN)<=50)log('RESPAWN_MAIN_TOWN_CONFIRMED');
+     else log('MAIN_TOWN_CAST_NOT_CONFIRMED_USE_FIXED_ROUTE');
+   }catch(e){log('MAIN_TOWN_CAST_FAILED_'+String(e?.message||e))}
+ }
+
  if(distance(pos(),IDLE)>16){
   await closeStand();
   if(canMoveTo(IDLE)){await nativeMoveTo(IDLE,'IDLE_DIRECT')}
@@ -144,6 +162,7 @@ function approvedItems(){
  return rows;
 }
 function needsBank(){
+ if(now()<bankDeferredUntil)return false;
  const items=approvedItems();
  return gold()>=DEPOSIT_AT_GOLD||(freeSlots()<=FREE_SLOTS_BANK&&items.length>0);
 }
@@ -221,6 +240,30 @@ async function pickupExistingParty(){
  state.partyPickups++;log('PARTY_HANDOFF_WINDOW_'+friend.name+'_GOLD_DELTA_'+(gold()-before.gold)+'_FREE_SLOTS_DELTA_'+(freeSlots()-before.freeSlots));
  await atStand();return true;
 }
+let defenseTimer=null,defenseBusy=false,lastDefenseAt=0,lastScareAt=0,scareBusy=false;
+async function merchantScare(){
+ if(!valid()||scareBusy||now()-lastScareAt<900)return;
+ const threatened=Object.values(host.entities||{}).some(e=>e?.type==='monster'&&!e.dead&&
+   (e.target===c.name||e.target===c.id));
+ if(!threatened||root.can_use?.('scare')!==true)return;
+ lastScareAt=now();scareBusy=true;
+ try{await root.use_skill('scare');state.scares++;log('SCARE_CAST_TARGETED')}
+ catch(e){log('SCARE_ERROR_'+String(e?.message||e))}
+ finally{scareBusy=false}
+}
+function startDefenses(){
+ if(defenseTimer!==null)return;
+ defenseTimer=root.setInterval(()=>{
+   if(defenseBusy||!valid())return;
+   defenseBusy=true;
+   void (async()=>{try{
+     await merchantScare();await merchantHealth();
+     if(now()-lastDefenseAt>9000){lastDefenseAt=now();await merchantMluck();}
+   }finally{defenseBusy=false}})().catch(e=>{
+     defenseBusy=false;log('DEFENSE_HEARTBEAT_ERROR_'+String(e?.message||e));
+   });
+ },1200);
+}
 async function merchantHealth(){
  if(c.hp>=c.max_hp-200)return;
  if(typeof root.use_hp_or_mp==='function')try{await Promise.resolve(root.use_hp_or_mp());state.potions++}catch(e){log('POTION_ERROR_'+String(e.message||e))}
@@ -274,12 +317,22 @@ async function start(){
   if(c.slots?.orb?.name!=='jacko')log('JACKO_ORB_NOT_EQUIPPED_SCARE_DEFERRED');
   state.active=true;
   report('STARTING');
+  startDefenses();
   await atStand();
   while(state.active&&!state.stopRequested){
    assertHealthy();report('STAND');
    await merchantHealth();
    await merchantMluck();
-   if(needsBank()){log('BANK_TRIGGER');await bankTrip();}
+   if(needsBank()){
+     log('BANK_TRIGGER');
+     try{await bankTrip();}
+     catch(e){
+       bankDeferredUntil=now()+BANK_FAILURE_RETRY_MS;
+       log('BANK_DEFERRED_'+String(e?.message||e));
+       if(c.map!=='main')throw e;
+       await atStand();
+     }
+   }
    else if(freeSlots()<=FREE_SLOTS_BANK&&approvedItems().length===0){log('INVENTORY_PRESSURE_HOLD_UNCLASSIFIED_ITEMS');}
    const friend=nearbyExistingParty();
    if(friend){await pickupExistingParty();if(needsBank())await bankTrip();}
@@ -290,6 +343,14 @@ async function start(){
     report('STAND');
    }
    if(needsBank()||nearbyExistingParty())continue;
+   if(REPAIRED_TOWN_DUTIES_ONLY){
+     // No Grinch patrol until the separately published route matches
+     // the user's validated editable circuit. Keep STAND/mluck/bank alive.
+     log('PATROL_HELD_FOR_V64_ROUTE_VALIDATION');
+     await atStand();
+     await delay(WAIT_BETWEEN_MS);
+     continue;
+   }
    await patrolOnce();
    await atStand();
    await delay(WAIT_BETWEEN_MS);
@@ -297,6 +358,8 @@ async function start(){
  }catch(e){
   state.lastError=String(e?.message||e);
   state.active=false;state.stopRequested=true;
+  // Keep one independent scare/potion/mluck heartbeat running in a
+  // stalled merchant CODE frame rather than abandoning Rentaro to mobs.
   log('HALTED_'+state.lastError);
   try{root.stop?.('move')}catch(_){}
   report('HALTED');
@@ -305,7 +368,7 @@ async function start(){
  state.active=false;report('STOPPED');
 }
 host.__O66_MERCHANT_DUTIES_STOP=false;
-host.__O66_MERCHANT_DUTIES_CONTROL={stop(){host.__O66_MERCHANT_DUTIES_STOP=true;state.stopRequested=true;host.__O66_V29_STOP=true;log('MANUAL_STOP');return true},status(){return JSON.parse(JSON.stringify(state))}};
+host.__O66_MERCHANT_DUTIES_CONTROL={stop(){host.__O66_MERCHANT_DUTIES_STOP=true;state.stopRequested=true;host.__O66_V29_STOP=true;if(defenseTimer!==null){root.clearInterval(defenseTimer);defenseTimer=null;}log('MANUAL_STOP');return true},status(){return JSON.parse(JSON.stringify(state))}};
 log('BOOTSTAPPED_MERCHANT_STAND_PATROL_BANK_NO_PARTY_LAUNCH');
 start();
 })(globalThis);
