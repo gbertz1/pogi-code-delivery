@@ -11,8 +11,10 @@ const SAFE={map:'halloween',x:-253.55556,y:680},FARM={map:'halloween',x:-495.5,y
 const MIN_HEALER_RANGE=88,MIN_WARRIOR_RANGE=110;
 const state={role,active:true,startedAt:Date.now(),ticks:0,attempts:0,moves:0,
   attacksHeld:0,skillsHeld:0,moveErrors:0,lastError:null,lastAction:null,lastMoveAt:0,
-  lastDistance:null,partyReady:false,priestSeen:false,warriorSeen:false};
+  lastDistance:null,partyReady:false,priestSeen:false,warriorSeen:false,
+  nativeRespawns:0,townEscapes:0};
 let busy=false,timer=null,priorAttack=null,priorSkill=null;
+let deadSince=null,lastRespawnAt=0,lastTownAt=0;
 const here=()=>root.character;
 const dist=(a,b)=>Math.hypot(Number(a.x)-Number(b.x),Number(a.y)-Number(b.y));
 const valid=x=>x&&x.rip!==true&&x.dead!==true&&
@@ -136,6 +138,41 @@ if(role==='Souji'){
 function tick(){
  if(!state.active)return;
  state.ticks++;
+ const c=here();
+ if(c?.rip===true||c?.dead===true||Number(c?.hp)<=0){
+   if(deadSince===null)deadSince=Date.now();
+   if(Date.now()-deadSince>2500&&Date.now()-lastRespawnAt>12000&&
+       typeof root.respawn==='function'){
+     lastRespawnAt=Date.now();state.lastAction='NATIVE_SELF_RESPAWN';
+     try{
+       const reply=root.respawn();
+       if(reply?.then)reply.then(()=>{state.nativeRespawns++}).catch(
+         e=>{state.lastError='RESPAWN_'+String(e?.message||e)});
+       else state.nativeRespawns++;
+     }catch(e){state.lastError=String(e?.message||e)}
+   }
+   return;
+ }
+ deadSince=null;
+ // The former xscorpion SAFE END is a route marker, not a safe combat camp.
+ // If teammates have broken formation and a monster pursues us there,
+ // use native Halloween Town. Do not continue a fatal stationary pull.
+ const p=memberPosition(c);
+ const nearEnd=inCorridor(p)&&dist(p,SAFE)<65;
+ const threat=Object.values(root.parent?.entities||{}).some(e=>e?.type==='monster'&&
+   !e.dead&&!e.rip&&(e.target===c.name||e.target===c.id));
+ const lost=role==='Souji'?!visible('Hibari'):!visible('Souji');
+ if(nearEnd&&lost&&threat&&Date.now()-lastTownAt>20000){
+   lastTownAt=Date.now();
+   try{
+     const town=typeof root.town==='function'?root.town():root.use_skill?.('use_town');
+     if(town?.then)town.then(()=>{state.townEscapes++}).catch(
+       e=>{state.lastError='TOWN_'+String(e?.message||e)});
+     else state.townEscapes++;
+     state.lastAction='RETREAT_TO_HALLOWEEN_TOWN';
+   }catch(e){state.lastError=String(e?.message||e)}
+   return;
+ }
  if(role==='Souji')healerFollow();
  else if(role==='Harutora'){
   // Mage does not move into scorpions while Hibari is absent.
