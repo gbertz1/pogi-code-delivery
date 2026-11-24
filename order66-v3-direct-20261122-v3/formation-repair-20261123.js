@@ -76,6 +76,12 @@ function moveTowards(goal,reason){
  finally{busy=false}
 }
 function healerFollow(){
+ // If core V3 boot finishes after this small first-on layer, retire only
+ // the competing Priest FARM scheduler then; NEVER stop the healer pulse.
+ const farmScheduler=root.__POGI_V3_DIRECT_RUNTIME?.scheduler;
+ if(farmScheduler?.status?.()?.running===true){
+   farmScheduler.stop();state.priestFarmSchedulerStopped=true;
+ }
  const c=here();
  if(!valid(c)||c.map!=='halloween')return;
  const warrior=visible('Hibari');
