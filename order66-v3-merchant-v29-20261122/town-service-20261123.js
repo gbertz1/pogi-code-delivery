@@ -31,7 +31,8 @@ function report(phase){
  try{host.localStorage.setItem('O66_RENTARO_TOWN_SERVICE',JSON.stringify(state))}catch(_){}
 }
 function error(e){
- state.lastError=String(e?.message||e);
+ state.lastError=String(e?.message||(
+   typeof e==='object'&&e!==null?JSON.stringify(e):e));
  state.errors.push({at:Date.now(),reason:state.lastError});
  if(state.errors.length>12)state.errors.shift();
 }
@@ -42,17 +43,31 @@ function nativeClear(to){
 }
 async function moveTo(to,label){
  if(!live()||c.map!==to.map)throw Error('WRONG_MAP_OR_DEAD_'+label);
- if(dist(pos(),to)<=12)return;
- if(!nativeClear(to))throw Error('NATIVE_FIXED_LEG_BLOCKED_'+label);
- const result=root.move(to.x,to.y);if(result?.catch)result.catch(()=>{});
- const until=Date.now()+Math.max(12000,Math.min(40000,
-   Math.ceil(dist(pos(),to)/Math.max(35,c.speed||55)*1600)+10000));
- while(Date.now()<until&&!stopRequested){
-  if(!live()||c.map!==to.map)throw Error('DEATH_OR_MAP_CHANGED_'+label);
-  if(dist(pos(),to)<=12){state.steps++;return;}
-  await WAIT(180);
+ let segments=0;
+ while(dist(pos(),to)>12&&segments<30&&!stopRequested){
+  const from=pos(),d=dist(from,to);
+  const scale=Math.min(1,Math.min(55,d)/Math.max(1,d));
+  const part={map:to.map,x:from.x+(to.x-from.x)*scale,
+    y:from.y+(to.y-from.y)*scale};
+  if(!nativeClear(part))throw Error('NATIVE_SHORT_LEG_BLOCKED_'+label+'_'+segments);
+  const result=root.move(part.x,part.y);
+  if(result?.catch)result.catch(()=>{});
+  const deadline=Date.now()+Math.max(4500,
+    Math.min(12000,Math.ceil(d/Math.max(35,c.speed||55)*800)+4500));
+  let last=pos(),progress=Date.now(),reached=false;
+  while(Date.now()<deadline&&!stopRequested){
+   if(!live()||c.map!==to.map)throw Error('DEATH_OR_MAP_CHANGED_'+label);
+   const nowPos=pos();
+   if(dist(nowPos,part)<=12){reached=true;break}
+   if(dist(nowPos,last)>3){progress=Date.now();last=nowPos}
+   if(Date.now()-progress>3500)break;
+   await WAIT(140);
+  }
+  if(!reached)throw Error('NATIVE_SHORT_LEG_TIMEOUT_'+label+'_'+segments+
+   '_AT_'+Math.round(c.x)+','+Math.round(c.y));
+  state.steps++;segments++;
  }
- throw Error('NATIVE_LEG_TIMEOUT_'+label);
+ if(dist(pos(),to)>12)throw Error('NATIVE_ROUTE_INCOMPLETE_'+label);
 }
 async function townNative(){
  if(c.map!=='main'||dist(pos(),TOWN)<=80)return true;
