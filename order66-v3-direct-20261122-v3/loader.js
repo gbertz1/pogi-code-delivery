@@ -15,6 +15,17 @@
       if(!res.ok)throw Error('O66_PART_DOWNLOAD_'+name+'_HTTP_'+res.status);
       return res.text();
     }));
+    // ORDER66 2026-11-23 restart guard. The old Harutora orbit override
+    // moved independently of Hibari/Souji and caused repeated deaths.
+    // Retire it BEFORE evaluating this legacy bundle, until the repaired
+    // GitHub-first V3 candidate replaces this entire delivery.
+    if(role==='Harutora'){
+      const guard={role:'Harutora',active:true,retired:true,
+        status:()=>({role:'Harutora',active:false,retired:true}),
+        stop:()=>({ok:true,retired:true})};
+      root.__O66_V3_FARM_COMBAT_PARITY=guard;
+      status.legacyMageOrbitDisabled=true;
+    }
     status.phase='EVAL';
     (0,eval)(texts.join(''));
     status.phase='STARTED';
