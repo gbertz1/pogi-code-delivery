@@ -33,12 +33,16 @@
     // moved independently of Hibari/Souji and caused repeated deaths.
     // Retire it BEFORE evaluating this legacy bundle, until the repaired
     // GitHub-first V3 candidate replaces this entire delivery.
-    if(role==='Harutora'){
-      const guard={role:'Harutora',active:true,retired:true,
-        status:()=>({role:'Harutora',active:false,retired:true}),
+    if(role==='Harutora'||role==='Hibari'){
+      // Both legacy parity timers duplicated canonical combat. Hibari's
+      // broad taunt/agitate kept pulling packs during a healer-first convoy.
+      // These must remain inert until the verified single-owner V3 rebuild.
+      try{root.__O66_V3_FARM_COMBAT_PARITY?.stop?.()}catch(_){}
+      const guard={role,active:true,retired:true,
+        status:()=>({role,active:false,retired:true}),
         stop:()=>({ok:true,retired:true})};
       root.__O66_V3_FARM_COMBAT_PARITY=guard;
-      status.legacyMageOrbitDisabled=true;
+      status.legacyCombatParityDisabled=true;
     }
     status.phase='EVAL';
     (0,eval)(texts.join(''));
