@@ -63,12 +63,24 @@ async function move(n,goal){
  state.moves++;
 }
 async function nativeTown(n){
- const f=w[n],at=pos(f);
+ const f=w[n],at=pos(f),center={x:0,y:0};
  if(at.map!=='main')throw Error('MAIN_REQUIRED');
- if(d(at,{x:0,y:0})<22)return;
- const result=typeof f.town==='function'?f.town():f.use_skill?.('use_town');
- if(result?.then)await result;
- await arrival(n,{x:0,y:0},'main',16000);
+ if(d(at,center)>75){
+   const result=typeof f.town==='function'?f.town():f.use_skill?.('use_town');
+   if(result?.then)await result;
+   // Actual native game Town landings may be 60px from map origin;
+   // a successful cast is not evidence of exactly x=0,y=0.
+   const end=Date.now()+16000;
+   while(Date.now()<end&&d(pos(f),center)>75)await wait(160);
+   if(d(pos(f),center)>75)throw Error('NATIVE_TOWN_SPAWN_NOT_REACHED_'+n);
+ }
+ const land=pos(f);
+ if(d(land,center)<10)return;
+ if(d(land,center)>70||f.can_move?.({map:'main',x:land.x,y:land.y,
+    going_x:0,going_y:0,base:f.character.base})!==true)
+   throw Error('TOWN_TO_SAVED_MAIN_START_BLOCKED_'+n);
+ const step=f.move(0,0);if(step?.catch)step.catch(()=>{});
+ await arrival(n,center,'main',12000);
 }
 async function transport(n){
  const f=w[n],at=pos(f),npc={x:-83,y:-441};
