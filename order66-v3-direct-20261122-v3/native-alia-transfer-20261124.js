@@ -54,6 +54,19 @@ async function arrival(n,aim,map,timeout=11000){
 async function move(n,goal){
  const f=w[n],from=pos(f),to={map:from.map,x:goal[0],y:goal[1]};
  if(d(from,to)<9)return;
+ // First waypoint may be ~65-80px from one random Town landing.
+ // Do a short native-verified join toward it, never a long blind move.
+ if(state.steps===0&&d(from,to)>65&&d(from,to)<100){
+   const len=d(from,to);
+   const mid={x:from.x+(to.x-from.x)*Math.min(35,len/2)/len,
+     y:from.y+(to.y-from.y)*Math.min(35,len/2)/len};
+   if(f.can_move?.({map:'main',x:from.x,y:from.y,
+       going_x:mid.x,going_y:mid.y,base:f.character.base})!==true)
+     throw Error('TOWN_JOIN_NATIVE_COLLISION_DENIED_'+n);
+   const r=f.move(mid.x,mid.y);if(r?.catch)r.catch(()=>{});
+   await arrival(n,mid,'main');
+   return move(n,goal);
+ }
  if(d(from,to)>65)throw Error('OPTIONAL_SEGMENT_TOO_LONG_'+n);
  if(f.can_move?.({map:from.map,x:from.x,y:from.y,
    going_x:to.x,going_y:to.y,base:f.character.base})!==true)
@@ -74,13 +87,12 @@ async function nativeTown(n){
    while(Date.now()<end&&d(pos(f),center)>75)await wait(160);
    if(d(pos(f),center)>75)throw Error('NATIVE_TOWN_SPAWN_NOT_REACHED_'+n);
  }
+ // Native Town can land at any verified point within the center's
+ // arrival circle. Do NOT force all characters to exact (0,0):
+ // Hibari's (37,-15) landing did not complete move(0,0).
+ // The OPTIONAL connector joins each landing directly at P[1].
  const land=pos(f);
- if(d(land,center)<10)return;
- if(d(land,center)>70||f.can_move?.({map:'main',x:land.x,y:land.y,
-    going_x:0,going_y:0,base:f.character.base})!==true)
-   throw Error('TOWN_TO_SAVED_MAIN_START_BLOCKED_'+n);
- const step=f.move(0,0);if(step?.catch)step.catch(()=>{});
- await arrival(n,center,'main',12000);
+ if(d(land,center)>75)throw Error('NATIVE_TOWN_NOT_WITHIN_CENTER_'+n);
 }
 async function transport(n){
  const f=w[n],at=pos(f),npc={x:-83,y:-441};
